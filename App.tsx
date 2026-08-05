@@ -101,10 +101,7 @@ const styles = StyleSheet.create({
   cardIcon: {
     fontSize: 28,
   },
-  cardLabel: {
-    fontSize: 18,
-    fontWeight: '600',
-  },
+  
   targetZone: {
     width: 100,
     height: 100,
