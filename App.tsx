@@ -104,7 +104,6 @@ const styles = StyleSheet.create({
   cardLabel: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#000000',
   },
   targetZone: {
     width: 100,
