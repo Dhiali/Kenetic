@@ -1,5 +1,6 @@
 import * as Haptics from "expo-haptics";
-import OnboardingFlow from "../screens/OnboardingFlow"; // adjust the path if necessary
+import OnboardingOne from "../screens/OnboardingOne";
+import OnboardingTwo from "../screens/OnboardingTwo"; // adjust the path if necessary
 import { LinearGradient } from "expo-linear-gradient";
 import { useEffect, useState } from "react";
 import {
@@ -76,8 +77,10 @@ export default function Index() {
         onComplete={() => go("ONBOARDING")}
       />
     );
-    if (screen === "ONBOARDING") 
-    return <OnboardingFlow onComplete={() => go("DASHBOARD")} />;
+   if (screen === "ONBOARDING")
+  return <OnboardingOne onComplete={() => go("RITUAL")} />;
+if (screen === "RITUAL")
+  return <OnboardingTwo onComplete={() => go("DASHBOARD")} />;
   if (screen === "PROFILE")
     return (
       <Profile
