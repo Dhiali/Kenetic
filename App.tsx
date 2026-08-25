@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { StatusBar } from "expo-status-bar";
+
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { View, StyleSheet, Text, Pressable } from "react-native";
 import { ScreenState } from "./src/types";
@@ -8,6 +9,7 @@ import SplashScreen from "./src/screens/SplashScreen";
 import TheFork from "./src/screens/TheFork";
 import LoginScreen from "./src/screens/LoginScreen";
 import SignupScreen from "./src/screens/SignupScreen";
+import OnboardingScreen from "./src/screens/OnboardingScreen";
 import IntakeCarousel from "./src/screens/IntakeCarousel";
 import GatewayScreen from "./src/screens/GatewayScreen";
 import BoundaryPrompt from "./src/screens/BoundaryPrompt";
@@ -58,6 +60,9 @@ export default function App() {
         return <SignupScreen onComplete={() => goTo("CAROUSEL")} />;
       case "CAROUSEL":
         return <IntakeCarousel onComplete={() => goTo("FOG")} />;
+        case "FOG":
+        // Assuming you want it to go to the GATEWAY screen next
+        return <OnboardingScreen onComplete={() => goTo("GATEWAY")} />;
       case "GATEWAY":
         return <GatewayScreen onComplete={() => goTo("BOUNDARY")} />;
       case "BOUNDARY":

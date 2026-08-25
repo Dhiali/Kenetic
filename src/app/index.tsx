@@ -1,5 +1,4 @@
 import * as Haptics from "expo-haptics";
-import OnBoarding from "./screens/OnBoarding";
 import { LinearGradient } from "expo-linear-gradient";
 import { useEffect, useState } from "react";
 import {
@@ -25,7 +24,7 @@ import Animated, {
   withSequence,
   withTiming,
 } from "react-native-reanimated";
-import OnboardingScreen from "@/screens/OnBoarding";
+import OnboardingScreen from "@/screens/OnboardingScreen";
 
 type Screen =
   | "SPLASH"
