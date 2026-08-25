@@ -1,31 +1,34 @@
+import { BlurView } from "expo-blur";
+import * as Haptics from "expo-haptics";
 import React, { useEffect, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
-import { BlurView } from "expo-blur";
 import Animated, {
   FadeIn,
-  FadeOut,
-  useSharedValue,
-  useAnimatedStyle,
-  withRepeat,
-  withSequence,
-  withTiming,
   interpolate,
   runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withSequence,
+  withTiming
 } from "react-native-reanimated";
-import * as Haptics from "expo-haptics";
 import { colors } from "../theme/colors";
 
-export default function PresenceScreen({ onComplete }: { onComplete: () => void }) {
+export default function PresenceScreen({
+  onComplete,
+}: {
+  onComplete: () => void;
+}) {
   const [isFinished, setIsFinished] = useState(false);
-  
+
   // Tracks how much of the fog has been wiped away (0 to 1)
   const clearProgress = useSharedValue(0);
-  
+
   // Tracks the last haptic milestone so we don't spam the vibration motor
   const lastHapticThreshold = useSharedValue(0);
 
-    // Track if completion has been triggered to prevent duplicate calls
+  // Track if completion has been triggered to prevent duplicate calls
   const isCompletionTriggered = useSharedValue(false);
 
   // Background blob animations
@@ -36,50 +39,42 @@ export default function PresenceScreen({ onComplete }: { onComplete: () => void 
     blobScale.value = withRepeat(
       withSequence(
         withTiming(1.1, { duration: 3000 }),
-        withTiming(1, { duration: 3000 })
+        withTiming(1, { duration: 3000 }),
       ),
       -1,
-      true
+      true,
     );
   }, []);
 
   // --------------------------------------------------------
   // Gesture: Scrubbing the screen to clear the fog
   // --------------------------------------------------------
-  const panGesture = Gesture.Pan()
-    .onUpdate((e) => {
-      if (isFinished) return;
-       if (isCompletionTriggered.value) return;
+  const panGesture = Gesture.Pan().onUpdate((e) => {
+    if (isCompletionTriggered.value) return; // Check shared value FIRST
+    if (isFinished) return;
 
-      // Accumulate progress based on movement speed/distance.
-      const newProgress = Math.min(1, clearProgress.value + 0.002);
-      clearProgress.value = newProgress;
+    const newProgress = Math.min(1, clearProgress.value + 0.002);
+    clearProgress.value = newProgress;
 
-      // Fire a subtle physical "grinding" haptic every 10% cleared
-      if (newProgress - lastHapticThreshold.value > 0.1) {
-        lastHapticThreshold.value = newProgress;
-        runOnJS(Haptics.impactAsync)(Haptics.ImpactFeedbackStyle.Light);
-      }
+    if (newProgress - lastHapticThreshold.value > 0.1) {
+      lastHapticThreshold.value = newProgress;
+      runOnJS(Haptics.impactAsync)(Haptics.ImpactFeedbackStyle.Light);
+    }
 
-      // If fully cleared, trigger the end sequence
-      if (newProgress >= 1) {
-         isCompletionTriggered.value = true;
-        runOnJS(handleComplete)();
-      }
-    });
+    if (newProgress >= 1 && !isCompletionTriggered.value) {
+      isCompletionTriggered.value = true;
+      runOnJS(handleComplete)();
+    }
+  });
 
   const handleComplete = () => {
-    if (isFinished) return;
+    if (isCompletionTriggered.value) return;
+    isCompletionTriggered.value = true;
     setIsFinished(true);
-    
-    // Final heavy click to signify clarity
+
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    
-    
-    // FADE OUT THE BLOB
     blobOpacity.value = withTiming(0, { duration: 800 });
-    
-    // Pause so they experience the pitch-black clarity before routing
+
     setTimeout(() => {
       onComplete();
     }, 1200);
@@ -88,7 +83,7 @@ export default function PresenceScreen({ onComplete }: { onComplete: () => void 
   // --------------------------------------------------------
   // Animated Styles
   // --------------------------------------------------------
-  
+
   // The fog layer fades out as progress approaches 1
   const fogStyle = useAnimatedStyle(() => ({
     opacity: interpolate(clearProgress.value, [0, 1], [1, 0]),
@@ -97,9 +92,7 @@ export default function PresenceScreen({ onComplete }: { onComplete: () => void 
   // The text fades out slightly faster than the fog so it disappears first
   const textStyle = useAnimatedStyle(() => ({
     opacity: interpolate(clearProgress.value, [0, 0.7], [1, 0]),
-    transform: [
-      { scale: interpolate(clearProgress.value, [0, 1], [1, 1.1]) }
-    ]
+    transform: [{ scale: interpolate(clearProgress.value, [0, 1], [1, 1.1]) }],
   }));
 
   // The background blob incorporates the new fade-out opacity
@@ -109,28 +102,28 @@ export default function PresenceScreen({ onComplete }: { onComplete: () => void 
   }));
 
   return (
-    <Animated.View 
-      entering={FadeIn.duration(800)} 
-      exiting={FadeOut.duration(600)} 
-      style={styles.container}
-    >
+    <Animated.View entering={FadeIn.duration(800)} style={styles.container}>
       {/* 1. The Distraction / Noise Blob */}
       <Animated.View style={[styles.blob, blobStyle]} />
 
       {/* 2. The Interactive Fog Layer */}
       <GestureDetector gesture={panGesture}>
         <Animated.View style={[styles.fogContainer, fogStyle]}>
-          
-          <BlurView intensity={100} tint="light" style={StyleSheet.absoluteFill} />
-          
+          <BlurView
+            intensity={100}
+            tint="light"
+            style={StyleSheet.absoluteFill}
+          />
+
           <View style={styles.frostOverlay} />
 
           {/* Typography floating in the fog */}
           <Animated.View style={[styles.textContainer, textStyle]}>
             <Text style={styles.title}>presence{"\n"}required.</Text>
-            <Text style={styles.subtitle}>wipe the screen to clear the noise.</Text>
+            <Text style={styles.subtitle}>
+              wipe the screen to clear the noise.
+            </Text>
           </Animated.View>
-
         </Animated.View>
       </GestureDetector>
     </Animated.View>
@@ -143,7 +136,7 @@ export default function PresenceScreen({ onComplete }: { onComplete: () => void 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0a0a0a', 
+    backgroundColor: "#0a0a0a",
     justifyContent: "center",
     alignItems: "center",
   },
@@ -156,18 +149,18 @@ const styles = StyleSheet.create({
   },
   fogContainer: {
     flex: 1,
-    width: '100%',
-    height: '100%',
+    width: "100%",
+    height: "100%",
     justifyContent: "center",
     alignItems: "center",
-    position: 'absolute',
+    position: "absolute",
   },
   frostOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(255, 255, 255, 0.4)', 
+    backgroundColor: "rgba(255, 255, 255, 0.4)",
   },
   textContainer: {
-    alignItems: 'center',
+    alignItems: "center",
     paddingHorizontal: 32,
     zIndex: 10,
   },
@@ -187,5 +180,5 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
     color: "rgba(0, 0, 0, 0.5)",
     textAlign: "center",
-  }
+  },
 });
