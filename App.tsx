@@ -11,7 +11,7 @@ import TheFork from "./src/screens/TheFork";
 import LoginScreen from "./src/screens/LoginScreen";
 import SignupScreen from "./src/screens/SignupScreen";
 import IntakeCarousel from "./src/screens/IntakeCarousel";
-import Onboarding from "./src/screens/Onboarding";
+import OnBoarding from "./src/screens/OnBoarding";
 import GatewayScreen from "./src/screens/GatewayScreen";
 import BoundaryPrompt from "./src/screens/BoundaryPrompt";
 import Dashboard from "./src/screens/Dashboard";

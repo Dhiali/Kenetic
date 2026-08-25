@@ -161,7 +161,10 @@ export default function OnboardingScreen({ onComplete }: { onComplete: () => voi
 
   return (
     <View style={styles.container}>
-      
+      {/* Add this line right here: */}
+  <Text style={{ color: "red", fontSize: 24, position: "absolute", top: 100, zIndex: 9999 }}>
+    DEBUG: SCREEN MOUNTED
+  </Text>
       {/* ==================== SCREEN 1 (FOG) ==================== */}
       <View 
         style={styles.absoluteCenter} 

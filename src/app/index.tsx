@@ -1,6 +1,5 @@
 import * as Haptics from "expo-haptics";
-import Onboarding from "./screens/Onboarding"; 
-// (or whatever path you put it in)// adjust the path if necessary
+import OnBoarding from "./screens/OnBoarding"; 
 import { LinearGradient } from "expo-linear-gradient";
 import { useEffect, useState } from "react";
 import {
