@@ -1,6 +1,6 @@
 import * as Haptics from "expo-haptics";
-import OnboardingOne from "../screens/OnboardingOne";
-import OnboardingTwo from "../screens/OnboardingTwo"; // adjust the path if necessary
+import Onboarding from "./screens/Onboarding"; 
+// (or whatever path you put it in)// adjust the path if necessary
 import { LinearGradient } from "expo-linear-gradient";
 import { useEffect, useState } from "react";
 import {
@@ -33,6 +33,7 @@ type Screen =
   | "LOGIN"
   | "SIGNUP"
   | "ONBOARDING"
+  | "RITUAL" 
   | "DASHBOARD"
   | "PROFILE"
   | "FOCUS"
@@ -77,18 +78,15 @@ export default function Index() {
         onComplete={() => go("ONBOARDING")}
       />
     );
-   if (screen === "ONBOARDING")
+  
+  
+if (screen === "ONBOARDING")
   return (
     <ScreenFrame>
-      <OnboardingOne onComplete={() => go("RITUAL")} />
+      <Onboarding onComplete={() => go("DASHBOARD")} />
     </ScreenFrame>
   );
-if (screen === "RITUAL")
-  return (
-    <ScreenFrame>
-      <OnboardingTwo onComplete={() => go("DASHBOARD")} />
-    </ScreenFrame>
-  );
+
   if (screen === "PROFILE")
     return (
       <Profile

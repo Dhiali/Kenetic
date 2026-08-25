@@ -11,8 +11,7 @@ import TheFork from "./src/screens/TheFork";
 import LoginScreen from "./src/screens/LoginScreen";
 import SignupScreen from "./src/screens/SignupScreen";
 import IntakeCarousel from "./src/screens/IntakeCarousel";
-import OnboardingOne from "./src/screens/OnboardingOne";
-import OnboardingTwo from "./src/screens/OnboardingTwo";
+import Onboarding from "./src/screens/Onboarding";
 import GatewayScreen from "./src/screens/GatewayScreen";
 import BoundaryPrompt from "./src/screens/BoundaryPrompt";
 import Dashboard from "./src/screens/Dashboard";
@@ -62,10 +61,6 @@ export default function App() {
         return <SignupScreen onComplete={() => goTo("CAROUSEL")} />;
       case "CAROUSEL":
         return <IntakeCarousel onComplete={() => goTo("FOG")} />;
-      case "FOG":
-        return <OnboardingOne onComplete={() => goTo("RITUAL")} />;
-      case "RITUAL":
-        return <OnboardingTwo onComplete={() => goTo("GATEWAY")} />;
       case "GATEWAY":
         return <GatewayScreen onComplete={() => goTo("BOUNDARY")} />;
       case "BOUNDARY":
