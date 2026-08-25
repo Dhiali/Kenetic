@@ -23,6 +23,7 @@
       "permissions": ["CAMERA"]
     },
     "plugins": [
+      "expo-notifications",
       [
         "expo-camera",
         {

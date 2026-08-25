@@ -1,30 +1,24 @@
-import React, { useState } from "react";
 import { StatusBar } from "expo-status-bar";
+import React, { useState } from "react";
 
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
-import { View, StyleSheet, Text, Pressable } from "react-native";
-import { ScreenState } from "./src/types";
-import { colors } from "./src/theme/colors";
+import Dashboard from "./src/screens/Dashboard";
+import FocusDashboard from "./src/screens/FocusDashboard";
+import GatewayScreen from "./src/screens/GatewayScreen";
+import IntakeCarousel from "./src/screens/IntakeCarousel";
+import LoginScreen from "./src/screens/LoginScreen";
+import OnboardingScreen from "./src/screens/OnboardingScreen";
+import ProfileScreen from "./src/screens/ProfileScreen";
+import SignupScreen from "./src/screens/SignupScreen";
 import SplashScreen from "./src/screens/SplashScreen";
 import TheFork from "./src/screens/TheFork";
-import LoginScreen from "./src/screens/LoginScreen";
-import SignupScreen from "./src/screens/SignupScreen";
-import OnboardingScreen from "./src/screens/OnboardingScreen";
-import IntakeCarousel from "./src/screens/IntakeCarousel";
-import GatewayScreen from "./src/screens/GatewayScreen";
-import BoundaryPrompt from "./src/screens/BoundaryPrompt";
-import Dashboard from "./src/screens/Dashboard";
-import ProfileScreen from "./src/screens/ProfileScreen";
+import { colors } from "./src/theme/colors";
+import { ScreenState } from "./src/types";
 
 // Screens below are not yet ported in this phase — placeholder keeps
 // the navigation graph intact and the app runnable end to end.
-function ComingSoon({
-  label,
-  onBack,
-}: {
-  label: string;
-  onBack: () => void;
-}) {
+function ComingSoon({ label, onBack }: { label: string; onBack: () => void }) {
   return (
     <View style={styles.comingSoon}>
       <Text style={styles.comingSoonTitle}>{label}</Text>
@@ -60,13 +54,11 @@ export default function App() {
         return <SignupScreen onComplete={() => goTo("CAROUSEL")} />;
       case "CAROUSEL":
         return <IntakeCarousel onComplete={() => goTo("FOG")} />;
-        case "FOG":
+      case "FOG":
         // Assuming you want it to go to the GATEWAY screen next
         return <OnboardingScreen onComplete={() => goTo("GATEWAY")} />;
       case "GATEWAY":
-        return <GatewayScreen onComplete={() => goTo("BOUNDARY")} />;
-      case "BOUNDARY":
-        return <BoundaryPrompt onComplete={() => goTo("DASHBOARD")} />;
+        return <GatewayScreen onComplete={() => goTo("DASHBOARD")} />;
       case "DASHBOARD":
         return (
           <Dashboard
@@ -89,16 +81,12 @@ export default function App() {
       case "GSD_TETHER":
       case "GSD_PENALTY":
       case "ALIEN_MODE":
-        return (
-          <ComingSoon label="focus." onBack={() => goTo("DASHBOARD")} />
-        );
+        return <FocusDashboard onBack={() => goTo("DASHBOARD")} />;
       case "BREATHE_DASHBOARD":
       case "BREATHE_SETUP":
       case "BREATHE_EXERCISE":
       case "BREATHE_RITUAL":
-        return (
-          <ComingSoon label="breathe." onBack={() => goTo("DASHBOARD")} />
-        );
+        return <ComingSoon label="breathe." onBack={() => goTo("DASHBOARD")} />;
       case "OUTDOORS_DASHBOARD":
       case "OUTDOORS_FEATURE":
         return (

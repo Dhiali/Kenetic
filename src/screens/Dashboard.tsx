@@ -1,303 +1,576 @@
-import React, { useState, useEffect } from "react";
-import { StyleSheet, Text, View, useWindowDimensions } from "react-native";
+import { BlurView } from "expo-blur";
+import * as Haptics from "expo-haptics";
+import * as Notifications from "expo-notifications";
+import React, { useEffect, useState } from "react";
+import { Dimensions, Platform, StyleSheet, Text, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
-  useSharedValue,
-  useAnimatedStyle,
-  withSpring,
-  withTiming,
-  withRepeat,
-  withSequence,
+  Easing,
+  FadeIn,
+  interpolate,
   interpolateColor,
   runOnJS,
-  FadeOut,
+  SlideInDown,
+  SlideOutDown,
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withSequence,
+  withSpring,
+  withTiming,
 } from "react-native-reanimated";
-import { colors } from "../theme/colors";
-import { hapticLight, hapticMedium, hapticDouble } from "../utils/haptics";
 
-type ItemId = "focus" | "outdoors" | "breathe";
+const { width, height } = Dimensions.get("window");
 
-const MENU_ITEMS: { id: ItemId; label: string; color: string }[] = [
-  { id: "focus", label: "focus.", color: colors.rose },
-  { id: "outdoors", label: "outdoors.", color: colors.green },
-  { id: "breathe", label: "breathe.", color: colors.orange },
-];
-
-function MenuWord({
-  item,
-  targetZone,
-  disabled,
-  onDragStart,
-  onDropped,
-  onDragCancel,
-  hidden,
-  dimmed,
-}: {
-  item: (typeof MENU_ITEMS)[number];
-  targetZone: { x: number; y: number; w: number; h: number };
-  disabled: boolean;
-  onDragStart: (id: ItemId) => void;
-  onDropped: (id: ItemId) => void;
-  onDragCancel: () => void;
-  hidden: boolean;
-  dimmed: boolean;
-}) {
-  const x = useSharedValue(0);
-  const y = useSharedValue(0);
-
-  const gesture = Gesture.Pan()
-    .enabled(!disabled)
-    .onStart(() => {
-      runOnJS(onDragStart)(item.id);
-    })
-    .onUpdate((e) => {
-      x.value = e.translationX;
-      y.value = e.translationY;
-    })
-    .onEnd((e) => {
-      const px = e.absoluteX;
-      const py = e.absoluteY;
-      if (
-        px > targetZone.x &&
-        py < targetZone.y + targetZone.h &&
-        py > targetZone.y
-      ) {
-        runOnJS(onDropped)(item.id);
-      } else {
-        x.value = withSpring(0);
-        y.value = withSpring(0);
-        runOnJS(onDragCancel)();
-      }
-    });
-
-  const style = useAnimatedStyle(() => ({
-    transform: [{ translateX: x.value }, { translateY: y.value }],
-    opacity: hidden ? 0 : dimmed ? 0.1 : 1,
-  }));
-
-  return (
-    <GestureDetector gesture={gesture}>
-      <Animated.View style={style}>
-        <Text style={[styles.menuWord, { color: item.color }]}>
-          {item.label}
-        </Text>
-      </Animated.View>
-    </GestureDetector>
-  );
-}
-
-export default function Dashboard({
+export default function DashboardScreen({
   onProfile,
   onFocus,
-  onBreathe,
   onOutdoors,
+  onBreathe,
 }: {
   onProfile: () => void;
   onFocus: () => void;
-  onBreathe: () => void;
   onOutdoors: () => void;
+  onBreathe: () => void;
 }) {
-  const { width, height } = useWindowDimensions();
-  const [draggingItem, setDraggingItem] = useState<ItemId | null>(null);
-  const [selectedItem, setSelectedItem] = useState<ItemId | null>(null);
+  // --------------------------------------------------------
+  // Boundary Prompt State
+  // --------------------------------------------------------
+  const [showBoundary, setShowBoundary] = useState(true);
+  const boundaryOpacity = useSharedValue(1);
 
-  // top-right quadrant, matching the web build's aura drop target
-  const targetZone = {
-    x: width * 0.35,
-    y: 0,
-    w: width * 0.65,
-    h: height * 0.4,
-  };
+  // --------------------------------------------------------
+  // Dashboard State (Magnetic Aura & Draggables)
+  // --------------------------------------------------------
+  const [selectedItem, setSelectedItem] = useState<{
+    id: string;
+    label: string;
+    color: string;
+  } | null>(null);
+  const [draggingItem, setDraggingItem] = useState<string | null>(null);
+  const auraScale = useSharedValue(1);
+  const auraOpacity = useSharedValue(0.62);
+  const auraProgress = useSharedValue(0);
+  const auraSlosh = useSharedValue(0);
+  const lavaDrift = useSharedValue(0);
+  const wipeScale = useSharedValue(0);
+  const wipeOpacity = useSharedValue(1);
 
-  const auraLoop = useSharedValue(0);
+  // Aura color shifts based on what is being dragged
+  const auraColor = useSharedValue("#00a8ff");
+
   useEffect(() => {
-    if (draggingItem || selectedItem) return;
-    auraLoop.value = withRepeat(
+    // 1. Slow outer expansion/pulse (6 seconds)
+    auraScale.value = withRepeat(
       withSequence(
-        withTiming(1, { duration: 6000 }),
-        withTiming(0, { duration: 6000 }),
+        withTiming(1.08, { duration: 6000, easing: Easing.inOut(Easing.ease) }),
+        withTiming(1, { duration: 6000, easing: Easing.inOut(Easing.ease) }),
       ),
       -1,
-      false,
+      true,
     );
-  }, [draggingItem, selectedItem]);
+    // 3. Vertical drift cycle (9 seconds)
+    auraProgress.value = withRepeat(
+      withSequence(
+        withTiming(1, { duration: 9000, easing: Easing.inOut(Easing.ease) }),
+        withTiming(0, { duration: 9000, easing: Easing.inOut(Easing.ease) }),
+      ),
+      -1,
+      true,
+    );
+    // 2. Slow horizontal slosh & morph cycle (7.5 seconds)
+    auraSlosh.value = withRepeat(
+      withSequence(
+        withTiming(1, { duration: 7500, easing: Easing.inOut(Easing.ease) }),
+        withTiming(-1, { duration: 7500, easing: Easing.inOut(Easing.ease) }),
+      ),
+      -1,
+      true,
+    );
+    lavaDrift.value = withRepeat(
+      withSequence(
+        withTiming(1, { duration: 5200, easing: Easing.inOut(Easing.ease) }),
+        withTiming(-1, { duration: 6800, easing: Easing.inOut(Easing.ease) }),
+      ),
+      -1,
+      true,
+    );
+  }, []);
 
-  const auraStyle = useAnimatedStyle(() => {
-    if (draggingItem) {
-      const color = MENU_ITEMS.find((m) => m.id === draggingItem)?.color;
-      return {
-        backgroundColor: color,
-        transform: [{ scale: 1.3 }, { translateX: -30 }, { translateY: 30 }],
-      };
-    }
-    const bg = interpolateColor(
-      auraLoop.value,
-      [0, 0.5, 1],
-      [colors.rose, colors.orange, colors.green],
+  const dismissBoundary = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(
+      () => undefined,
     );
-    return {
-      backgroundColor: bg,
-      transform: [{ scale: 1 }, { translateX: 0 }, { translateY: 0 }],
-    };
-  });
+    boundaryOpacity.value = withTiming(0, { duration: 400 });
+    setTimeout(() => {
+      setShowBoundary(false);
+    }, 400);
+  };
+
+  const handleNotificationChoice = async (choice: "later" | "sure") => {
+    if (choice === "sure") {
+      await Notifications.requestPermissionsAsync().catch(() => undefined);
+    }
+    dismissBoundary();
+  };
+
+  const handleDropSuccess = (id: string, label: string, color: string) => {
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
+      () => undefined,
+    );
+    setSelectedItem({ id, label, color });
+    wipeScale.value = withTiming(40, { duration: 1000 });
+    setTimeout(() => {
+      if (id === "focus") onFocus();
+      if (id === "outdoors") onOutdoors();
+      if (id === "breathe") onBreathe();
+    }, 1000);
+  };
+
+  // --------------------------------------------------------
+  // Draggable Dashboard Item Component
+  // --------------------------------------------------------
+  const DraggableMenuItem = ({ id, label, color, action }: any) => {
+    const x = useSharedValue(0);
+    const y = useSharedValue(0);
+    const isGrabbed = useSharedValue(false);
+
+    const gesture = Gesture.Pan()
+      .enabled(!showBoundary && !selectedItem) // Disable interaction during the prompt or state transition
+      .onBegin(() => {
+        isGrabbed.value = true;
+        runOnJS(setDraggingItem)(id);
+        auraColor.value = withTiming(color, { duration: 300 });
+        auraOpacity.value = withTiming(0.82, { duration: 300 });
+        runOnJS(triggerImpact)(Haptics.ImpactFeedbackStyle.Light);
+      })
+      .onUpdate((e) => {
+        x.value = e.translationX;
+        y.value = e.translationY;
+      })
+      .onEnd((e) => {
+        isGrabbed.value = false;
+        runOnJS(setDraggingItem)(null);
+        auraColor.value = withTiming("#00a8ff", { duration: 500 });
+        auraOpacity.value = withTiming(0.62, { duration: 500 });
+
+        // If dropped in the top-right quadrant (Magnetic Aura)
+        if (e.translationX > 50 && e.translationY < -100) {
+          x.value = withSpring(150, { damping: 15, stiffness: 200 });
+          y.value = withSpring(-150, { damping: 15, stiffness: 200 });
+          runOnJS(handleDropSuccess)(id, label, color);
+        } else {
+          // Snap back
+          x.value = withSpring(0, { damping: 12, stiffness: 200 });
+          y.value = withSpring(0, { damping: 12, stiffness: 200 });
+        }
+      });
+
+    const style = useAnimatedStyle(() => ({
+      transform: [{ translateX: x.value }, { translateY: y.value }],
+      opacity: draggingItem && draggingItem !== id ? 0.2 : 1, // Dim others
+      color,
+    }));
+
+    return (
+      <GestureDetector gesture={gesture}>
+        <Animated.View style={styles.menuItemLayer}>
+          <Animated.Text style={[styles.cursiveMenuItem, style]}>
+            {label}
+          </Animated.Text>
+        </Animated.View>
+      </GestureDetector>
+    );
+  };
+
+  // --------------------------------------------------------
+  // Animated Styles
+  // --------------------------------------------------------
+  const auraStyle = useAnimatedStyle(() => ({
+    transform: [
+      { scale: auraScale.value },
+      { translateX: interpolate(auraSlosh.value, [-1, 1], [-25, 25]) },
+      { translateY: interpolate(auraProgress.value, [0, 1], [-20, 20]) },
+      // Morphing container shape organically using opposing X/Y scales
+      { scaleX: interpolate(auraSlosh.value, [-1, 1], [0.88, 1.16]) },
+      { scaleY: interpolate(auraProgress.value, [0, 1], [1.18, 0.86]) },
+      { rotate: `${interpolate(auraSlosh.value, [-1, 1], [-8, 8])}deg` },
+    ],
+    opacity: auraOpacity.value,
+  }));
+
+  const boundaryOverlayStyle = useAnimatedStyle(() => ({
+    opacity: boundaryOpacity.value,
+  }));
+
+  const lavaOneStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: interpolate(lavaDrift.value, [-1, 1], [95, -70]) },
+      { translateY: interpolate(auraProgress.value, [0, 1], [70, -55]) },
+      { scaleX: interpolate(auraSlosh.value, [-1, 1], [0.82, 1.2]) },
+      { scaleY: interpolate(auraProgress.value, [0, 1], [1.25, 0.78]) },
+    ],
+    backgroundColor: interpolateColor(
+      auraProgress.value,
+      [0, 0.5, 0],
+      ["#00a8ff", "#9b4dff", "#ecda34"],
+    ),
+    borderRadius: 260,
+    opacity: 0.58,
+  }));
+
+  const lavaTwoStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: interpolate(lavaDrift.value, [-1, 1], [-80, 100]) },
+      { translateY: interpolate(auraSlosh.value, [-1, 1], [-60, 75]) },
+      { scaleX: interpolate(auraProgress.value, [0, 1], [1.3, 0.76]) },
+      { scaleY: interpolate(auraSlosh.value, [-1, 1], [0.72, 1.3]) },
+    ],
+    backgroundColor: interpolateColor(
+      auraSlosh.value,
+      [-1, 0, 1],
+      ["#9b4dff", "#e7d219", "#00a8ff"],
+    ),
+    borderRadius: 240,
+    opacity: 1,
+  }));
 
   const profileX = useSharedValue(0);
   const profileGesture = Gesture.Pan()
-    .onUpdate((e) => {
-      profileX.value = Math.min(0, Math.max(-60, e.translationX));
+    .enabled(!selectedItem)
+    .onUpdate((event) => {
+      profileX.value =
+        event.translationX > 0 ? event.translationX * 0.1 : event.translationX;
     })
-    .onEnd((e) => {
-      if (e.translationX < -50) {
-        runOnJS(hapticLight)();
+    .onEnd((event) => {
+      if (event.translationX < -60) {
+        runOnJS(triggerImpact)(Haptics.ImpactFeedbackStyle.Medium);
         runOnJS(onProfile)();
+      } else {
+        profileX.value = withSpring(0, { damping: 15, stiffness: 200 });
       }
-      profileX.value = withSpring(0);
     });
+
   const profileStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: profileX.value }],
   }));
 
-  const handleDropped = (id: ItemId) => {
-    setSelectedItem(id);
-    hapticDouble();
-    setTimeout(() => {
-      if (id === "focus") onFocus();
-      else if (id === "breathe") onBreathe();
-      else if (id === "outdoors") onOutdoors();
-      setSelectedItem(null);
-      setDraggingItem(null);
-    }, 1500);
-  };
-
-  const wipeColor =
-    selectedItem === "focus"
-      ? colors.rose
-      : selectedItem === "outdoors"
-        ? colors.green
-        : colors.orange;
+  const wipeStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: wipeScale.value }],
+    backgroundColor: selectedItem?.color || "transparent",
+    opacity: wipeOpacity.value,
+  }));
 
   return (
-    <Animated.View exiting={FadeOut.duration(400)} style={styles.container}>
-      <Animated.View style={[styles.aura, auraStyle]} pointerEvents="none" />
+    <Animated.View entering={FadeIn.duration(600)} style={styles.container}>
+      {/* --------------------------------------------------- */}
+      {/* 1. The Dashboard Base Layer */}
+      {/* --------------------------------------------------- */}
 
-      <View style={styles.content}>
-        <Text style={styles.heading}>
-          drag state into aura{"\n"}to shift mindsets
-        </Text>
+      {/* Top Right Magnetic Aura */}
+      <Animated.View style={[styles.aura, auraStyle]}>
+        <Animated.View style={[styles.lavaBlob, lavaOneStyle]} />
+        <Animated.View style={[styles.lavaBlob, lavaTwoStyle]} />
+        <BlurView intensity={92} tint="light" style={styles.auraBlurLayer} />
+      </Animated.View>
 
-        <View style={styles.menuList}>
-          {MENU_ITEMS.map((item) => (
-            <MenuWord
-              key={item.id}
-              item={item}
-              targetZone={targetZone}
-              disabled={!!selectedItem}
-              hidden={selectedItem === item.id}
-              dimmed={!!draggingItem && draggingItem !== item.id}
-              onDragStart={(id) => {
-                setDraggingItem(id);
-                hapticLight();
-              }}
-              onDragCancel={() => setDraggingItem(null)}
-              onDropped={handleDropped}
-            />
-          ))}
+      <View style={styles.dashboardContent} pointerEvents="box-none">
+        <View style={styles.headerBlock}>
+          <Text style={styles.headlineText}>
+            Drag your desired{"\n"}state into the{"\n"}aura to enter.
+          </Text>
         </View>
+
+        <View style={styles.menuContainer} pointerEvents="box-none">
+          <DraggableMenuItem
+            id="focus"
+            label="focus"
+            color="#e11d48"
+            action={onFocus}
+          />
+          <DraggableMenuItem
+            id="outdoors"
+            label="outdoors"
+            color="#16a34a"
+            action={onOutdoors}
+          />
+          <DraggableMenuItem
+            id="breathe"
+            label="breathe"
+            color="#f97316"
+            action={onBreathe}
+          />
+        </View>
+
+        {/* Profile Anchor (Bottom Left) */}
+        <GestureDetector gesture={profileGesture}>
+          <Animated.Text style={[styles.profileText, profileStyle]}>
+            &larr; your profile.
+          </Animated.Text>
+        </GestureDetector>
       </View>
 
-      <GestureDetector gesture={profileGesture}>
-        <Animated.View style={[styles.profileLink, profileStyle]}>
-          <Text style={styles.profileLinkText}>&larr; your profile.</Text>
-        </Animated.View>
-      </GestureDetector>
-
-      {selectedItem && (
+      {/* --------------------------------------------------- */}
+      {/* 2. The Boundary Prompt Overlay */}
+      {/* --------------------------------------------------- */}
+      {showBoundary && (
         <Animated.View
-          pointerEvents="none"
-          entering={undefined}
-          style={styles.wipeContainer}
+          style={[
+            StyleSheet.absoluteFill,
+            styles.boundaryOverlay,
+            boundaryOverlayStyle,
+          ]}
         >
-          <View style={[styles.wipeCircle, { backgroundColor: wipeColor }]} />
-          <View style={styles.wipeTextWrap}>
-            <Text style={styles.wipeText}>
-              {MENU_ITEMS.find((m) => m.id === selectedItem)?.label}
+          {/* Blurs the entire dashboard beneath it */}
+          <BlurView
+            intensity={40}
+            tint="dark"
+            style={StyleSheet.absoluteFill}
+          />
+
+          {/* The Slide-Up Card */}
+          <Animated.View
+            entering={SlideInDown.duration(600).springify().damping(18)}
+            exiting={SlideOutDown.duration(400)}
+            style={styles.boundaryCard}
+          >
+            <Text style={styles.boundaryTitle}>
+              would you like push notifications from kenetic?
             </Text>
-          </View>
+
+            <Text style={styles.boundaryText}>
+              Swipe an option to choose how kenetic keeps you in the loop.
+            </Text>
+
+            <View style={styles.boundaryActions}>
+              <SwipeOption
+                label="Maybe later"
+                accent="#9ca3af"
+                onChoose={() => handleNotificationChoice("later")}
+              />
+              <SwipeOption
+                label="Sure"
+                accent="#16a34a"
+                onChoose={() => handleNotificationChoice("sure")}
+              />
+            </View>
+          </Animated.View>
         </Animated.View>
       )}
+
+      {selectedItem && (
+        <View style={StyleSheet.absoluteFill} pointerEvents="none">
+          <Animated.View style={[styles.wipeCircle, wipeStyle]} />
+          <Animated.View style={styles.wipeTextContainer}>
+            <Animated.Text
+              entering={FadeIn.delay(260).duration(760)}
+              style={styles.selectedStateText}
+            >
+              {selectedItem.label}
+            </Animated.Text>
+          </Animated.View>
+        </View>
+      )}
     </Animated.View>
+  );
+}
+
+const triggerImpact = (style: Haptics.ImpactFeedbackStyle) => {
+  Haptics.impactAsync(style).catch(() => undefined);
+};
+
+function SwipeOption({
+  label,
+  accent,
+  onChoose,
+}: {
+  label: string;
+  accent: string;
+  onChoose: () => void;
+}) {
+  const translateX = useSharedValue(0);
+  const gesture = Gesture.Pan()
+    .activeOffsetX([-12, 12])
+    .onUpdate((event) => {
+      translateX.value = Math.max(0, event.translationX);
+    })
+    .onEnd(() => {
+      if (translateX.value > 70) {
+        runOnJS(onChoose)();
+      }
+      translateX.value = withSpring(0, { damping: 15, stiffness: 180 });
+    });
+  const optionStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: translateX.value }],
+    opacity: translateX.value > 70 ? 0.55 : 1,
+  }));
+
+  return (
+    <GestureDetector gesture={gesture}>
+      <Animated.Text
+        style={[styles.notificationOption, { color: accent }, optionStyle]}
+      >
+        {label} →
+      </Animated.Text>
+    </GestureDetector>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.bgDark,
-    overflow: "hidden",
+    backgroundColor: "#111315",
   },
+
+  // Dashboard Styles
   aura: {
     position: "absolute",
-    top: -128,
-    right: -128,
-    width: 500,
+    top: -150,
+    right: -100,
+    width: 600,
     height: 500,
-    borderRadius: 250,
-    opacity: 0.5,
+    borderRadius: 300,
+    overflow: "hidden",
+    shadowColor: "#7c3aed",
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.45,
+    shadowRadius: 52,
+    elevation: 18,
   },
-  content: {
-    flex: 1,
-    paddingTop: 100,
-    paddingHorizontal: 32,
+  auraBlurLayer: {
+    ...StyleSheet.absoluteFillObject,
+    opacity: 0.34,
   },
-  heading: {
-    fontSize: 22,
-    fontWeight: "500",
-    letterSpacing: -0.5,
-    lineHeight: 26,
-    color: colors.white,
-    marginBottom: 72,
-  },
-  menuList: {
-    gap: 28,
-    alignItems: "flex-start",
-  },
-  menuWord: {
-    fontSize: 44,
-    fontWeight: "900",
-    letterSpacing: -1.5,
-  },
-  profileLink: {
+  lavaBlob: {
     position: "absolute",
-    bottom: 48,
-    left: 32,
+    width: "82%",
+    height: "92%",
+    top: "20%",
+    left: "9%",
+    shadowColor: "#9b4dff",
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 2,
+    shadowRadius: 54,
+    elevation: 66,
   },
-  profileLinkText: {
+  dashboardContent: {
+    flex: 1,
+    padding: 32,
+    paddingTop: 80,
+    justifyContent: "space-between",
+  },
+  headerBlock: {
+    marginTop: 20,
+    marginBottom: 40,
+    transform: [{ translateY: 170 }],
+  },
+  headlineText: {
+    fontSize: 35,
+    lineHeight: 40,
+    fontWeight: "800",
+    color: "rgba(150, 147, 152, 0.82)",
+    letterSpacing: -1,
+  },
+  menuContainer: {
+    gap: 15,
+    paddingLeft: 8,
+    transform: [{ translateY: 50 }],
+  },
+  menuItemLayer: {
+    zIndex: 1,
+  },
+  cursiveMenuItem: {
+    fontSize: 60,
+    fontFamily: Platform.OS === "ios" ? "Georgia" : "serif",
+    fontStyle: "italic",
+    letterSpacing: -1,
+    zIndex: 10,
+    paddingVertical: 10,
+  },
+  selectedStateText: {
+    fontSize: 82,
+    fontFamily: Platform.OS === "ios" ? "Georgia" : "serif",
+    fontStyle: "italic",
+    fontWeight: "900",
+    letterSpacing: -2,
+    color: "#ffffff",
+    textShadowColor: "rgba(255, 255, 255, 0.45)",
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 12,
+  },
+  profileText: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "rgba(255, 255, 255, 0.5)",
+    letterSpacing: -0.5,
+    marginBottom: 20,
+    paddingVertical: 10,
+  },
+
+  // Boundary Prompt Styles
+  boundaryOverlay: {
+    zIndex: 20,
+  },
+  boundaryCard: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: "85%",
+    // Keep dashboard content visible behind the sheet while preserving the card layer.
+    backgroundColor: "rgba(18, 18, 18, 0.78)",
+    borderTopLeftRadius: 72,
+    borderTopRightRadius: 32,
+    padding: 32,
+    paddingTop: 18,
+    paddingBottom: 64,
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255, 255, 255, 0.1)",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: -10 },
+    shadowOpacity: 0.5,
+    shadowRadius: 20,
+    elevation: 20,
+    zIndex: 1,
+  },
+  boundaryTitle: {
+    fontSize: 32,
+    fontWeight: "900",
+    color: "#ffffff",
+    letterSpacing: -1,
+    marginBottom: 16,
+  },
+  boundaryText: {
     fontSize: 16,
     fontWeight: "500",
-    color: colors.white50,
+    color: "rgba(255, 255, 255, 0.6)",
+    lineHeight: 24,
+    marginBottom: 48,
   },
-  wipeContainer: {
-    ...StyleSheet.absoluteFillObject,
+  boundaryActions: {
+    alignItems: "flex-start",
+    gap: 20,
+    marginTop: 18,
+  },
+  notificationOption: {
+    fontSize: 24,
+    fontWeight: "800",
+    paddingVertical: 10,
+    paddingHorizontal: 8,
   },
   wipeCircle: {
     position: "absolute",
-    top: "50%",
-    right: "-20%",
-    width: 320,
-    height: 320,
-    marginTop: -160,
-    borderRadius: 160,
-    opacity: 0.95,
+    top: -100,
+    right: -100,
+    width: 200,
+    height: 200,
+    borderRadius: 100,
+    zIndex: 50,
   },
-  wipeTextWrap: {
+  wipeTextContainer: {
     ...StyleSheet.absoluteFillObject,
-    alignItems: "center",
     justifyContent: "center",
-  },
-  wipeText: {
-    fontSize: 44,
-    fontWeight: "900",
-    letterSpacing: -1.5,
-    color: colors.white,
+    alignItems: "center",
+    zIndex: 60,
   },
 });

@@ -1,3 +1,6 @@
+import DashboardScreen from "@/screens/Dashboard";
+import OnboardingScreen from "@/screens/OnboardingScreen";
+import { BlurView } from "expo-blur";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import { useEffect, useState } from "react";
@@ -12,19 +15,23 @@ import {
   View,
 } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import type { SharedValue } from "react-native-reanimated";
 import Animated, {
   Easing,
   FadeIn,
   FadeOut,
+  interpolate,
   runOnJS,
+  SlideInDown,
+  SlideOutDown,
   useAnimatedStyle,
   useSharedValue,
   withDelay,
   withRepeat,
   withSequence,
+  withSpring,
   withTiming,
 } from "react-native-reanimated";
-import OnboardingScreen from "@/screens/OnboardingScreen";
 
 type Screen =
   | "SPLASH"
@@ -32,7 +39,7 @@ type Screen =
   | "LOGIN"
   | "SIGNUP"
   | "ONBOARDING"
-  | "RITUAL" 
+  | "RITUAL"
   | "DASHBOARD"
   | "PROFILE"
   | "FOCUS"
@@ -44,6 +51,14 @@ const colors = {
   paper: "#f5f5f5",
   white: "#fff",
   line: "#242424",
+};
+
+const triggerImpact = (style: Haptics.ImpactFeedbackStyle) => {
+  Haptics.impactAsync(style).catch(() => undefined);
+};
+
+const triggerNotification = (type: Haptics.NotificationFeedbackType) => {
+  Haptics.notificationAsync(type).catch(() => undefined);
 };
 
 export default function Index() {
@@ -77,14 +92,13 @@ export default function Index() {
         onComplete={() => go("ONBOARDING")}
       />
     );
-  
-  
-if (screen === "ONBOARDING")
-  return (
-    <ScreenFrame>
-      <OnboardingScreen onComplete={() => go("DASHBOARD")} />
-    </ScreenFrame>
-  );
+
+  if (screen === "ONBOARDING")
+    return (
+      <ScreenFrame>
+        <OnboardingScreen onComplete={() => go("DASHBOARD")} />
+      </ScreenFrame>
+    );
 
   if (screen === "PROFILE")
     return (
@@ -99,7 +113,7 @@ if (screen === "ONBOARDING")
   if (screen === "BREATHE") return <Breathe onBack={() => go("DASHBOARD")} />;
   if (screen === "OUTDOORS") return <Outdoors onBack={() => go("DASHBOARD")} />;
   return (
-    <Dashboard
+    <DashboardScreen
       onProfile={() => go("PROFILE")}
       onFocus={() => go("FOCUS")}
       onBreathe={() => go("BREATHE")}
@@ -324,6 +338,21 @@ function Dashboard({
   onOutdoors: () => void;
 }) {
   const [selected, setSelected] = useState<string | null>(null);
+  const [showBoundary, setShowBoundary] = useState(true);
+  const boundaryOpacity = useSharedValue(1);
+
+  const dismissBoundary = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(
+      () => undefined,
+    );
+    boundaryOpacity.value = withTiming(0, { duration: 320 });
+    setTimeout(() => setShowBoundary(false), 320);
+  };
+
+  const boundaryOverlayStyle = useAnimatedStyle(() => ({
+    opacity: boundaryOpacity.value,
+  }));
+
   const select = (id: string, action: () => void) => {
     setSelected(id);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
@@ -336,7 +365,10 @@ function Dashboard({
   };
   return (
     <ScreenFrame>
-      <View style={styles.dashboard}>
+      <View
+        style={styles.dashboard}
+        pointerEvents={showBoundary ? "none" : "auto"}
+      >
         <View>
           <Text style={styles.eyebrow}>kenetic / command center</Text>
           <Text style={styles.heading}>drag state into{`\n`}aura.</Text>
@@ -371,6 +403,39 @@ function Dashboard({
           <Text style={styles.profileText}>← your profile.</Text>
         </Pressable>
       </View>
+      {showBoundary && (
+        <Animated.View
+          style={[StyleSheet.absoluteFillObject, boundaryOverlayStyle]}
+        >
+          <BlurView
+            intensity={42}
+            tint="dark"
+            style={StyleSheet.absoluteFillObject}
+          />
+          <Animated.View
+            entering={SlideInDown.duration(600).springify().damping(18)}
+            exiting={SlideOutDown.duration(320)}
+            style={styles.boundaryCard}
+          >
+            <Text style={styles.boundaryTitle}>allow{"\n"}boundaries?</Text>
+            <Text style={styles.boundaryText}>
+              Are there any digital boundaries or physical tasks you need to
+              clear before immersing yourself?
+            </Text>
+            <View style={styles.boundaryActions}>
+              <Pressable
+                onPress={dismissBoundary}
+                style={styles.boundaryButton}
+              >
+                <Text style={styles.boundaryButtonText}>i am clear →</Text>
+              </Pressable>
+              <Pressable onPress={dismissBoundary}>
+                <Text style={styles.boundaryNotNow}>not now</Text>
+              </Pressable>
+            </View>
+          </Animated.View>
+        </Animated.View>
+      )}
     </ScreenFrame>
   );
 }
@@ -531,24 +596,181 @@ function FeatureList({
   );
 }
 function Focus({ onBack }: { onBack: () => void }) {
+  const auraScale = useSharedValue(1);
+  const auraMorph = useSharedValue(0);
+  const auraExpand = useSharedValue(0);
+  const exitTranslateX = useSharedValue(0);
+
+  useEffect(() => {
+    auraScale.value = withRepeat(
+      withSequence(
+        withTiming(1.08, { duration: 2600, easing: Easing.inOut(Easing.ease) }),
+        withTiming(1, { duration: 2600, easing: Easing.inOut(Easing.ease) }),
+      ),
+      -1,
+      true,
+    );
+    auraMorph.value = withRepeat(
+      withSequence(
+        withTiming(1, { duration: 7000, easing: Easing.inOut(Easing.ease) }),
+        withTiming(-1, { duration: 7000, easing: Easing.inOut(Easing.ease) }),
+      ),
+      -1,
+      true,
+    );
+  }, []);
+
+  const exitGesture = Gesture.Pan()
+    .activeOffsetX(10)
+    .onUpdate((event) => {
+      if (event.translationX > 0) exitTranslateX.value = event.translationX;
+    })
+    .onEnd((event) => {
+      if (event.translationX > 80) {
+        runOnJS(onBack)();
+      } else {
+        exitTranslateX.value = withSpring(0, { damping: 15, stiffness: 200 });
+      }
+    });
+
+  const auraStyle = useAnimatedStyle(() => ({
+    transform: [
+      { scale: auraScale.value + auraExpand.value * 0.45 },
+      { translateX: interpolate(auraMorph.value, [-1, 1], [-30, 20]) },
+      { translateY: interpolate(auraMorph.value, [-1, 1], [-20, 25]) },
+      { scaleX: interpolate(auraMorph.value, [-1, 1], [0.94, 1.15]) },
+      { scaleY: interpolate(auraMorph.value, [-1, 1], [1.12, 0.9]) },
+    ],
+    opacity: interpolate(auraExpand.value, [0, 1, 2], [0.7, 0.9, 1]),
+  }));
+
+  const screenStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: exitTranslateX.value }],
+  }));
+
   return (
-    <FeatureList
-      title="focus state."
-      accent="#e11d48"
-      onBack={onBack}
-      items={[
-        {
-          title: "get shit done.",
-          description:
-            "Connect your attention to a sound tether and protect a deep work session.",
-        },
-        {
-          title: "alien mode.",
-          description:
-            "Turn an overwhelming task into one physical first action.",
-        },
-      ]}
-    />
+    <ScreenFrame>
+      <Animated.View
+        style={[styles.focusScreen, screenStyle]}
+        entering={FadeIn.duration(500)}
+      >
+        <Animated.View style={[styles.focusAura, auraStyle]}>
+          <LinearGradient
+            colors={["#b3133b", "#e11d48", "rgba(225,29,72,0)"]}
+            locations={[0, 0.48, 1]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={StyleSheet.absoluteFillObject}
+          />
+          <BlurView
+            intensity={70}
+            tint="dark"
+            style={StyleSheet.absoluteFillObject}
+          />
+        </Animated.View>
+
+        <ScrollView contentContainerStyle={styles.focusContent}>
+          <GestureDetector gesture={exitGesture}>
+            <View style={styles.focusTopNav}>
+              <Text style={styles.focusBackLabel}>← dashboard </Text>
+              <Text style={styles.focusBackHint}>
+                (drag right to exit focus state)
+              </Text>
+            </View>
+          </GestureDetector>
+          <Text style={styles.focusTitle}>focus state.</Text>
+          <View style={styles.focusMetrics}>
+            <FocusMetric value="3.5h" label="deep session total today" />
+            <FocusMetric value="88%" label="off-screen tether score" />
+            <FocusMetric value="12" label="tasks deconstructed" />
+          </View>
+          <View style={styles.focusGateways}>
+            <FocusGateway
+              title="get shit done."
+              label="sound tether & app lock"
+              description="Connects Apple Music or Spotify. Activates background audio and automatically pauses playback if you stay actively on your phone for more than 2 minutes."
+              auraExpand={auraExpand}
+              onLaunch={() => undefined}
+            />
+            <FocusGateway
+              title="alien mode."
+              label="ai task deconstructor"
+              description={
+                'Intercepts overwhelming tasks and prompts you with a "Beginner\'s Mind" question to reframe your perspective before the timer begins.'
+              }
+              auraExpand={auraExpand}
+              onLaunch={() => undefined}
+            />
+          </View>
+        </ScrollView>
+      </Animated.View>
+    </ScreenFrame>
+  );
+}
+
+function FocusMetric({ value, label }: { value: string; label: string }) {
+  return (
+    <View style={styles.focusMetric}>
+      <Text style={styles.focusMetricValue}>{value}</Text>
+      <Text style={styles.focusMetricLabel}>{label}</Text>
+    </View>
+  );
+}
+
+function FocusGateway({
+  title,
+  label,
+  description,
+  auraExpand,
+  onLaunch,
+}: {
+  title: string;
+  label: string;
+  description: string;
+  auraExpand: SharedValue<number>;
+  onLaunch: () => void;
+}) {
+  const translateY = useSharedValue(0);
+  const isGrabbed = useSharedValue(false);
+  const gesture = Gesture.Pan()
+    .onStart(() => {
+      isGrabbed.value = true;
+      runOnJS(triggerImpact)(Haptics.ImpactFeedbackStyle.Light);
+    })
+    .onUpdate((event) => {
+      translateY.value = Math.min(0, event.translationY);
+      auraExpand.value = withTiming(
+        Math.min(1.2, Math.max(0, -event.translationY / 200)),
+        { duration: 100 },
+      );
+    })
+    .onEnd((event) => {
+      isGrabbed.value = false;
+      if (event.translationY < -110) {
+        auraExpand.value = withTiming(2.5, { duration: 350 });
+        runOnJS(triggerNotification)(Haptics.NotificationFeedbackType.Success);
+        runOnJS(onLaunch)();
+      } else {
+        auraExpand.value = withTiming(0, { duration: 300 });
+      }
+      translateY.value = withSpring(0, { damping: 16, stiffness: 180 });
+    });
+  const style = useAnimatedStyle(() => ({
+    transform: [
+      { translateY: translateY.value },
+      { scale: isGrabbed.value ? 1.03 : 1 },
+    ],
+    opacity: isGrabbed.value ? 0.88 : 1,
+  }));
+
+  return (
+    <GestureDetector gesture={gesture}>
+      <Animated.View style={[styles.focusGatewayCard, style]}>
+        <Text style={styles.focusGatewayTitle}>{title}</Text>
+        <Text style={styles.focusGatewayLabel}>{label}</Text>
+        <Text style={styles.focusGatewayDescription}>{description}</Text>
+      </Animated.View>
+    </GestureDetector>
   );
 }
 function Breathe({ onBack }: { onBack: () => void }) {
@@ -745,6 +967,45 @@ const styles = StyleSheet.create({
   chevron: { color: "#666", fontSize: 32 },
   profileLink: { position: "absolute", bottom: 30, left: 28 },
   profileText: { color: "#aaa", fontSize: 17, fontWeight: "600" },
+  boundaryCard: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: "#f5f5f5",
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    padding: 28,
+    paddingTop: 34,
+    paddingBottom: 42,
+  },
+  boundaryTitle: {
+    color: "#111",
+    fontSize: 34,
+    lineHeight: 34,
+    fontWeight: "900",
+    letterSpacing: -1.5,
+  },
+  boundaryText: {
+    color: "#555",
+    fontSize: 15,
+    lineHeight: 22,
+    marginTop: 18,
+    maxWidth: 340,
+  },
+  boundaryActions: {
+    alignItems: "flex-end",
+    gap: 12,
+    marginTop: 28,
+  },
+  boundaryButton: {
+    backgroundColor: "#111",
+    borderRadius: 999,
+    paddingHorizontal: 20,
+    paddingVertical: 13,
+  },
+  boundaryButtonText: { color: colors.white, fontWeight: "800" },
+  boundaryNotNow: { color: "#888", fontWeight: "700", padding: 8 },
   profile: { flexGrow: 1, padding: 28, paddingTop: 38 },
   avatar: {
     width: 112,
@@ -773,6 +1034,109 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.line,
     paddingVertical: 28,
     gap: 5,
+  },
+  focusScreen: {
+    flex: 1,
+    backgroundColor: colors.black,
+    overflow: "hidden",
+  },
+  focusAura: {
+    position: "absolute",
+    top: -150,
+    left: -90,
+    width: 430,
+    height: 420,
+    borderRadius: 220,
+    backgroundColor: "#e11d48",
+    overflow: "hidden",
+    shadowColor: "#e11d48",
+    shadowOpacity: 0.55,
+    shadowRadius: 60,
+    shadowOffset: { width: 0, height: 14 },
+    elevation: 18,
+  },
+  focusTopNav: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 12,
+    marginBottom: 24,
+  },
+  focusBackLabel: {
+    color: "#e11d48",
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  focusBackHint: {
+    color: "rgba(255,255,255,0.35)",
+    fontSize: 13,
+    fontWeight: "500",
+  },
+  focusContent: {
+    padding: 32,
+    paddingTop: 112,
+    paddingBottom: 48,
+  },
+  focusTitle: {
+    color: colors.white,
+    fontSize: 52,
+    lineHeight: 54,
+    fontWeight: "900",
+    letterSpacing: -2,
+    marginBottom: 36,
+  },
+  focusMetrics: {
+    gap: 18,
+    marginBottom: 64,
+  },
+  focusMetric: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    gap: 14,
+  },
+  focusMetricValue: {
+    color: colors.white,
+    minWidth: 94,
+    fontSize: 46,
+    fontWeight: "900",
+    letterSpacing: -2,
+  },
+  focusMetricLabel: {
+    color: "#858585",
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 1.3,
+    textTransform: "uppercase",
+    flexShrink: 1,
+  },
+  focusGateways: {
+    marginTop: 68,
+    gap: 42,
+  },
+  focusGatewayCard: {
+    borderTopWidth: 1,
+    borderTopColor: colors.line,
+    paddingTop: 24,
+  },
+  focusGatewayTitle: {
+    color: colors.white,
+    fontSize: 36,
+    lineHeight: 38,
+    fontWeight: "900",
+    letterSpacing: -1.5,
+  },
+  focusGatewayLabel: {
+    color: "#e11d48",
+    fontSize: 12,
+    fontWeight: "800",
+    letterSpacing: 1.4,
+    textTransform: "uppercase",
+    marginTop: 6,
+  },
+  focusGatewayDescription: {
+    color: "#777",
+    fontSize: 15,
+    lineHeight: 23,
+    marginTop: 14,
   },
   featureTitle: {
     color: colors.white,
