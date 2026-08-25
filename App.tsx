@@ -2,16 +2,13 @@ import React, { useState } from "react";
 import { StatusBar } from "expo-status-bar";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { View, StyleSheet, Text, Pressable } from "react-native";
-
 import { ScreenState } from "./src/types";
 import { colors } from "./src/theme/colors";
-
 import SplashScreen from "./src/screens/SplashScreen";
 import TheFork from "./src/screens/TheFork";
 import LoginScreen from "./src/screens/LoginScreen";
 import SignupScreen from "./src/screens/SignupScreen";
 import IntakeCarousel from "./src/screens/IntakeCarousel";
-import OnBoarding from "./src/screens/OnBoarding";
 import GatewayScreen from "./src/screens/GatewayScreen";
 import BoundaryPrompt from "./src/screens/BoundaryPrompt";
 import Dashboard from "./src/screens/Dashboard";

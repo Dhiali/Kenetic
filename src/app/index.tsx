@@ -1,5 +1,5 @@
 import * as Haptics from "expo-haptics";
-import OnBoarding from "./screens/OnBoarding"; 
+import OnBoarding from "./screens/OnBoarding";
 import { LinearGradient } from "expo-linear-gradient";
 import { useEffect, useState } from "react";
 import {
@@ -25,6 +25,7 @@ import Animated, {
   withSequence,
   withTiming,
 } from "react-native-reanimated";
+import OnboardingScreen from "@/screens/OnBoarding";
 
 type Screen =
   | "SPLASH"
@@ -82,7 +83,7 @@ export default function Index() {
 if (screen === "ONBOARDING")
   return (
     <ScreenFrame>
-      <Onboarding onComplete={() => go("DASHBOARD")} />
+      <OnboardingScreen onComplete={() => go("DASHBOARD")} />
     </ScreenFrame>
   );
 
