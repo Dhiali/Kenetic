@@ -25,6 +25,9 @@ export default function PresenceScreen({ onComplete }: { onComplete: () => void 
   // Tracks the last haptic milestone so we don't spam the vibration motor
   const lastHapticThreshold = useSharedValue(0);
 
+    // Track if completion has been triggered to prevent duplicate calls
+  const isCompletionTriggered = useSharedValue(false);
+
   // Background blob animations
   const blobScale = useSharedValue(1);
   const blobOpacity = useSharedValue(0.8); // Added opacity state for the fade out
@@ -46,6 +49,7 @@ export default function PresenceScreen({ onComplete }: { onComplete: () => void 
   const panGesture = Gesture.Pan()
     .onUpdate((e) => {
       if (isFinished) return;
+       if (isCompletionTriggered.value) return;
 
       // Accumulate progress based on movement speed/distance.
       const newProgress = Math.min(1, clearProgress.value + 0.002);
@@ -59,6 +63,7 @@ export default function PresenceScreen({ onComplete }: { onComplete: () => void 
 
       // If fully cleared, trigger the end sequence
       if (newProgress >= 1) {
+         isCompletionTriggered.value = true;
         runOnJS(handleComplete)();
       }
     });
@@ -69,6 +74,7 @@ export default function PresenceScreen({ onComplete }: { onComplete: () => void 
     
     // Final heavy click to signify clarity
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    
     
     // FADE OUT THE BLOB
     blobOpacity.value = withTiming(0, { duration: 800 });
