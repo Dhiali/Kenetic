@@ -78,9 +78,17 @@ export default function Index() {
       />
     );
    if (screen === "ONBOARDING")
-  return <OnboardingOne onComplete={() => go("RITUAL")} />;
+  return (
+    <ScreenFrame>
+      <OnboardingOne onComplete={() => go("RITUAL")} />
+    </ScreenFrame>
+  );
 if (screen === "RITUAL")
-  return <OnboardingTwo onComplete={() => go("DASHBOARD")} />;
+  return (
+    <ScreenFrame>
+      <OnboardingTwo onComplete={() => go("DASHBOARD")} />
+    </ScreenFrame>
+  );
   if (screen === "PROFILE")
     return (
       <Profile
