@@ -142,22 +142,22 @@ export default function ProfileScreen({
     transform: [{ translateX: editX.value }],
   }));
 
-  const logoutY = useSharedValue(0);
+  const logoutX = useSharedValue(0);
   const logoutGesture = Gesture.Pan()
     .enabled(!saving)
     .onUpdate((event) => {
-      logoutY.value = Math.max(0, Math.min(100, event.translationY));
+      logoutX.value = Math.max(0, Math.min(100, event.translationX));
     })
     .onEnd((event) => {
-      if (event.translationY > 70) {
+      if (event.translationX > 70) {
         runOnJS(hapticLight)();
         runOnJS(logout)();
       } else {
-        logoutY.value = withSpring(0, { damping: 15, stiffness: 200 });
+        logoutX.value = withSpring(0, { damping: 15, stiffness: 200 });
       }
     });
   const logoutStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: logoutY.value }],
+    transform: [{ translateX: logoutX.value }],
   }));
 
   const logout = async () => {
@@ -169,7 +169,7 @@ export default function ProfileScreen({
     } catch (error) {
       setMessage(firebaseErrorMessage(error));
       setSaving(false);
-      logoutY.value = withSpring(0, { damping: 15, stiffness: 200 });
+      logoutX.value = withSpring(0, { damping: 15, stiffness: 200 });
     }
   };
 
@@ -448,7 +448,7 @@ export default function ProfileScreen({
           <GestureDetector gesture={logoutGesture}>
             <Animated.View style={logoutStyle}>
               <Text style={styles.logoutText}>logout.</Text>
-              <Text style={styles.logoutHint}>swipe down to logout ↓</Text>
+              <Text style={styles.logoutHint}>swipe right to logout →</Text>
             </Animated.View>
           </GestureDetector>
         </View>

@@ -32,11 +32,13 @@ export default function DashboardScreen({
   onFocus,
   onOutdoors,
   onBreathe,
+  showNotificationPrompt = true,
 }: {
   onProfile: () => void;
   onFocus: () => void;
   onOutdoors: () => void;
   onBreathe: () => void;
+  showNotificationPrompt?: boolean;
 }) {
   // --------------------------------------------------------
   // Boundary Prompt State
@@ -50,7 +52,7 @@ export default function DashboardScreen({
     void getNotificationPreference()
       .then((preference) => {
         if (!mounted) return;
-        setShowBoundary(preference === undefined);
+        setShowBoundary(showNotificationPrompt && preference === undefined);
         if (preference === "sure") void syncNotificationDevice();
       })
       .catch(() => {
@@ -59,7 +61,7 @@ export default function DashboardScreen({
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [showNotificationPrompt]);
 
   // --------------------------------------------------------
   // Dashboard State (Magnetic Aura & Draggables)

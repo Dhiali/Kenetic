@@ -229,6 +229,16 @@ service cloud.firestore {
           && request.resource.data.selectedAt is timestamp;
         allow update: if false;
       }
+
+      match /focusFeatureLaunches/{launchId} {
+        allow read, delete: if ownsUser(userId);
+        allow create: if ownsUser(userId)
+          && request.resource.data.keys().hasAll(['feature', 'source', 'launchedAt'])
+          && request.resource.data.feature in ['get-shit-done', 'alien-mode']
+          && request.resource.data.source == 'focus-dashboard'
+          && request.resource.data.launchedAt is timestamp;
+        allow update: if false;
+      }
     }
   }
 }

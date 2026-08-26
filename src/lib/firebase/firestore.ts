@@ -109,6 +109,12 @@ export type DashboardSelectionRecord = {
   selectedAt: unknown;
 };
 
+export type FocusFeatureLaunchRecord = {
+  feature: "get-shit-done" | "alien-mode";
+  source: "focus-dashboard";
+  launchedAt: unknown;
+};
+
 export function userReference(uid: string): DocumentReference<UserProfile> {
   return doc(firestore, "users", uid) as DocumentReference<UserProfile>;
 }
@@ -230,6 +236,19 @@ export const intentionsCollection = (uid: string) =>
   userCollection<IntentionRecord>(uid, "intentions");
 export const dashboardSelectionsCollection = (uid: string) =>
   userCollection<DashboardSelectionRecord>(uid, "dashboardSelections");
+export const focusFeatureLaunchesCollection = (uid: string) =>
+  userCollection<FocusFeatureLaunchRecord>(uid, "focusFeatureLaunches");
+
+export function createFocusFeatureLaunch(
+  uid: string,
+  feature: FocusFeatureLaunchRecord["feature"],
+) {
+  return addDoc(focusFeatureLaunchesCollection(uid), {
+    feature,
+    source: "focus-dashboard",
+    launchedAt: serverTimestamp(),
+  });
+}
 
 export function createDashboardSelection(
   uid: string,
@@ -294,9 +313,53 @@ export function completeSession(
   });
 }
 
+export function abandonSession(
+  uid: string,
+  sessionId: string,
+  metadata?: Record<string, unknown>,
+) {
+  return updateDoc(doc(sessionsCollection(uid), sessionId), {
+    status: "abandoned",
+    completedAt: serverTimestamp(),
+    ...(metadata ? { metadata } : {}),
+  });
+}
+
 export async function getUserMetrics(uid: string) {
   const snapshot = await getDocs(metricsCollection(uid));
   return snapshot.docs.map((metric) => metric.data());
+}
+
+export async function getFocusDashboardMetrics(uid: string) {
+  const snapshot = await getDocs(sessionsCollection(uid));
+  const sessions = snapshot.docs.map((session) => session.data());
+  const completedFocusSessions = sessions.filter(
+    (session) => session.type === "focus" && session.status === "completed",
+  );
+  const getShitDoneSessions = completedFocusSessions.filter(
+    (session) => session.metadata?.mode === "get-shit-done",
+  );
+  const alienModeSessions = completedFocusSessions.filter(
+    (session) => session.metadata?.mode === "alien-mode",
+  );
+  const handoffCompletedSessions = getShitDoneSessions.filter(
+    (session) => session.metadata?.handoffSeconds === 120,
+  );
+  const minutesFor = (records: typeof completedFocusSessions) =>
+    records.reduce(
+      (total, session) => total + (session.durationSeconds ?? 0) / 60,
+      0,
+    );
+
+  return {
+    completedSessions: completedFocusSessions.length,
+    getShitDoneSessions: getShitDoneSessions.length,
+    alienModeSessions: alienModeSessions.length,
+    handoffCompletedSessions: handoffCompletedSessions.length,
+    getShitDoneMinutes: Math.round(minutesFor(getShitDoneSessions)),
+    alienModeMinutes: Math.round(minutesFor(alienModeSessions)),
+    totalFocusMinutes: Math.round(minutesFor(completedFocusSessions)),
+  };
 }
 
 export function createNotificationEvent(

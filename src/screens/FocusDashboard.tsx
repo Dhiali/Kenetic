@@ -16,6 +16,15 @@ import Animated, {
     withSpring,
     withTiming,
 } from "react-native-reanimated";
+import {
+    loadFocusDashboardMetrics,
+    persistFocusFeatureLaunch,
+} from "../lib/firebase/bootstrap";
+import { firebaseErrorMessage } from "../lib/firebase/errors";
+
+const triggerFocusImpact = () => {
+  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined);
+};
 
 type Props = {
   onBack: () => void;
@@ -28,11 +37,24 @@ export default function FocusDashboard({
   onGetShitDone = () => undefined,
   onAlienMode = () => undefined,
 }: Props) {
+  const [metrics, setMetrics] = React.useState({
+    completedSessions: 0,
+    getShitDoneSessions: 0,
+    alienModeSessions: 0,
+    handoffCompletedSessions: 0,
+    getShitDoneMinutes: 0,
+    alienModeMinutes: 0,
+    totalFocusMinutes: 0,
+  });
+  const [launchError, setLaunchError] = React.useState<string | null>(null);
   const auraScale = useSharedValue(1);
   const auraMorph = useSharedValue(0);
   const exitX = useSharedValue(0);
 
   useEffect(() => {
+    void loadFocusDashboardMetrics()
+      .then(setMetrics)
+      .catch(() => undefined);
     auraScale.value = withRepeat(
       withSequence(
         withTiming(1.08, { duration: 2600, easing: Easing.inOut(Easing.ease) }),
@@ -63,6 +85,19 @@ export default function FocusDashboard({
         exitX.value = withSpring(0, { damping: 15, stiffness: 200 });
       }
     });
+
+  const launchFeature = async (
+    feature: "get-shit-done" | "alien-mode",
+    action: () => void,
+  ) => {
+    setLaunchError(null);
+    try {
+      await persistFocusFeatureLaunch(feature);
+      action();
+    } catch (error) {
+      setLaunchError(firebaseErrorMessage(error));
+    }
+  };
 
   const auraStyle = useAnimatedStyle(() => ({
     transform: [
@@ -108,16 +143,38 @@ export default function FocusDashboard({
         </GestureDetector>
         <Text style={styles.title}>focus state.</Text>
         <View style={styles.metrics}>
-          <Metric value="3.5h" label="deep session total today" />
-          <Metric value="88%" label="off-screen tether score" />
-          <Metric value="12" label="tasks deconstructed" />
+          <Metric
+            value={`${metrics.completedSessions}`}
+            label="completed sessions"
+          />
+          <Metric
+            value={`${metrics.totalFocusMinutes}m`}
+            label="focus time completed"
+          />
+          <Metric
+            value={`${metrics.getShitDoneSessions}`}
+            label="get shit done sessions"
+          />
+          <Metric
+            value={`${metrics.alienModeSessions}`}
+            label="alien mode sessions"
+          />
+          <Metric
+            value={`${metrics.alienModeMinutes}m`}
+            label="alien mode time completed"
+          />
+          <Metric
+            value={`${metrics.handoffCompletedSessions}`}
+            label="two-minute handoffs completed"
+          />
         </View>
+        {launchError && <Text style={styles.error}>{launchError}</Text>}
         <View style={styles.gateways}>
           <Gateway
             title="get shit done."
             label="sound tether & app lock"
             description="Connects Apple Music or Spotify. Activates background audio and automatically pauses playback if you stay actively on your phone for more than 2 minutes."
-            onLaunch={onGetShitDone}
+            onLaunch={() => void launchFeature("get-shit-done", onGetShitDone)}
           />
           <Gateway
             title="alien mode."
@@ -125,7 +182,7 @@ export default function FocusDashboard({
             description={
               'Intercepts overwhelming tasks and prompts you with a "Beginner\'s Mind" question to reframe your perspective before the timer begins.'
             }
-            onLaunch={onAlienMode}
+            onLaunch={() => void launchFeature("alien-mode", onAlienMode)}
           />
         </View>
       </ScrollView>
@@ -158,9 +215,7 @@ function Gateway({
   const gesture = Gesture.Pan()
     .onStart(() => {
       active.value = true;
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(
-        () => undefined,
-      );
+      runOnJS(triggerFocusImpact)();
     })
     .onUpdate((event) => {
       y.value = Math.min(0, event.translationY);
@@ -269,4 +324,5 @@ const styles = StyleSheet.create({
     marginTop: 18,
     textTransform: "uppercase",
   },
+  error: { color: "#fca5a5", fontSize: 12, lineHeight: 18, marginBottom: 18 },
 });

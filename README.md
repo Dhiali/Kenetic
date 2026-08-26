@@ -60,3 +60,10 @@ Scan the QR code with Expo Go on your phone.
   Daily Challenges)
 
 Just say the word and I'll continue with the next phase.
+
+## Alien Mode
+
+Alien Mode uses deterministic local reframing so it works on Firebase's free
+Spark plan and in Expo Go. It does not require an AI API key or Cloud Function.
+The original task and the user's chosen micro-action are still stored in the
+authenticated user's focus session record.

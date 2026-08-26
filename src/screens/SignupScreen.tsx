@@ -1,11 +1,16 @@
 import * as AppleAuthentication from "expo-apple-authentication";
 import * as Google from "expo-auth-session/providers/google";
-import { randomUUID } from "expo-crypto";
+import {
+  CryptoDigestAlgorithm,
+  digestStringAsync,
+  randomUUID,
+} from "expo-crypto";
 import { Apple, ChevronRight, Chrome } from "lucide-react-native";
 import React, { useEffect, useState } from "react";
 import {
   KeyboardAvoidingView,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -55,6 +60,7 @@ export default function SignupScreen({
   const [errors, setErrors] = useState<SignupErrors>({});
   const [submitting, setSubmitting] = useState(false);
   const [googleRequest, googleResponse, promptGoogle] = Google.useAuthRequest({
+    clientId: googleWebClientId ?? undefined,
     androidClientId: googleAndroidClientId ?? undefined,
     iosClientId: googleIosClientId ?? undefined,
     webClientId: googleWebClientId ?? undefined,
@@ -99,7 +105,12 @@ export default function SignupScreen({
     setErrors({});
     setSubmitting(true);
     hapticLight();
-    await promptGoogle();
+    try {
+      await promptGoogle();
+    } catch (error) {
+      setErrors({ form: firebaseErrorMessage(error) });
+      setSubmitting(false);
+    }
   };
 
   const startAppleSignup = async () => {
@@ -113,8 +124,12 @@ export default function SignupScreen({
     hapticLight();
     try {
       const rawNonce = randomUUID();
+      const hashedNonce = await digestStringAsync(
+        CryptoDigestAlgorithm.SHA256,
+        rawNonce,
+      );
       const credential = await AppleAuthentication.signInAsync({
-        nonce: rawNonce,
+        nonce: hashedNonce,
         requestedScopes: [
           AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
           AppleAuthentication.AppleAuthenticationScope.EMAIL,
@@ -229,7 +244,7 @@ export default function SignupScreen({
           {onBack && (
             <GestureDetector gesture={backGesture}>
               <Animated.Text style={[styles.backLink, backStyle]}>
-                ← Where to?
+                Where to ? →
               </Animated.Text>
             </GestureDetector>
           )}
@@ -360,10 +375,11 @@ const styles = StyleSheet.create({
     marginBottom: 32,
   },
   backLink: {
+    top: 64,
     color: colors.gray400,
     fontSize: 14,
     fontWeight: "700",
-    marginBottom: 28,
+    marginBottom: 72,
   },
   intro: {
     color: colors.white50,

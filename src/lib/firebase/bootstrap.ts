@@ -4,21 +4,28 @@ import {
     deleteCurrentUser,
     ensureAnonymousUser,
     getCurrentUser,
+    googleCredential,
+    signInWithEmailPassword,
+    signInWithProviderCredential,
+    signInWithProviderCredentialDirect,
     signOutCurrentUser,
     updateCurrentUserEmail,
     updateCurrentUserProfile,
 } from "./auth";
 import {
+    abandonSession,
+    completeSession,
     createDashboardSelection,
+    createFocusFeatureLaunch,
     createUserProfile,
     deleteUserData,
+    getFocusDashboardMetrics,
     getUserProfile,
-    googleCredential,
     markOnboardingComplete,
     saveInitialIntention,
     saveNotificationPreference,
     saveRegisteredUserProfile,
-    signInWithProviderCredential,
+    startSession,
     updateProfileDetails,
 } from "./firestore";
 import {
@@ -40,6 +47,11 @@ export async function bootstrapAnonymousUser() {
   }
 
   return user;
+}
+
+export async function restoreSignedInAccount() {
+  const user = await bootstrapAnonymousUser();
+  return user.isAnonymous ? null : user;
 }
 
 export async function persistOnboardingCompletion() {
@@ -198,4 +210,105 @@ export async function registerProviderAccount(
     onboardingCompleted: false,
   });
   return credential.user;
+}
+
+export async function loginWithEmailAccount(email: string, password: string) {
+  const credential = await signInWithEmailPassword(
+    email.trim().toLowerCase(),
+    password,
+  );
+  return credential.user;
+}
+
+export async function loginWithProviderAccount(
+  provider: "google" | "apple",
+  token: string,
+  rawNonce?: string,
+) {
+  const credential = await signInWithProviderCredentialDirect(
+    provider === "google"
+      ? googleCredential(token)
+      : appleCredential(token, rawNonce),
+  );
+  return credential.user;
+}
+
+export async function startFocusTether(
+  platform: "spotify" | "apple-music",
+  plannedMinutes: number,
+) {
+  const user = await ensureAnonymousUser();
+  const session = await startSession(user.uid, "focus", {
+    mode: "get-shit-done",
+    platform,
+    tetherSeconds: 120,
+    plannedMinutes,
+  });
+  return session.id;
+}
+
+export async function finishFocusTether(
+  sessionId: string,
+  durationSeconds: number,
+  completed: boolean,
+) {
+  const user = await ensureAnonymousUser();
+  if (completed) {
+    await completeSession(user.uid, sessionId, durationSeconds, {
+      mode: "get-shit-done",
+      handoffSeconds: 120,
+      completionReason: "session-finished",
+    });
+  } else {
+    await abandonSession(user.uid, sessionId, {
+      mode: "get-shit-done",
+      reason: "tether-expired",
+    });
+  }
+}
+
+export async function loadFocusDashboardMetrics() {
+  const user = await ensureAnonymousUser();
+  return getFocusDashboardMetrics(user.uid);
+}
+
+export async function persistFocusFeatureLaunch(
+  feature: "get-shit-done" | "alien-mode",
+) {
+  const user = await ensureAnonymousUser();
+  await createFocusFeatureLaunch(user.uid, feature);
+}
+
+export async function startAlienModeSession(
+  overwhelmingTask: string,
+  microAction: string,
+  prompt: string,
+) {
+  const user = await ensureAnonymousUser();
+  const session = await startSession(user.uid, "focus", {
+    mode: "alien-mode",
+    overwhelmingTask,
+    microAction,
+    prompt,
+  });
+  return session.id;
+}
+
+export async function finishAlienModeSession(
+  sessionId: string,
+  durationSeconds: number,
+  completed: boolean,
+) {
+  const user = await ensureAnonymousUser();
+  if (completed) {
+    await completeSession(user.uid, sessionId, durationSeconds, {
+      mode: "alien-mode",
+      completionReason: "session-finished",
+    });
+  } else {
+    await abandonSession(user.uid, sessionId, {
+      mode: "alien-mode",
+      reason: "user-left-session",
+    });
+  }
 }

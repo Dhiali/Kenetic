@@ -18,6 +18,7 @@ import {
     reauthenticateWithCredential,
     signInAnonymously,
     signInWithCredential,
+    signInWithEmailAndPassword,
     signOut,
     updateEmail,
     updateProfile,
@@ -53,14 +54,29 @@ export function deleteCurrentUser() {
   return deleteUser(user);
 }
 
+function waitForAuthReady(): Promise<User | null> {
+  if (auth.currentUser) return Promise.resolve(auth.currentUser);
+  return new Promise((resolve) => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      unsubscribe();
+      resolve(user);
+    });
+  });
+}
+
 export async function ensureAnonymousUser(): Promise<User> {
-  if (auth.currentUser) return auth.currentUser;
+  const restoredUser = await waitForAuthReady();
+  if (restoredUser) return restoredUser;
   const credential = await signInAnonymously(auth);
   return credential.user;
 }
 
 export function signInAsAnonymous(): Promise<UserCredential> {
   return signInAnonymously(auth);
+}
+
+export function signInWithEmailPassword(email: string, password: string) {
+  return signInWithEmailAndPassword(auth, email, password);
 }
 
 export async function createEmailAccount(
@@ -118,6 +134,12 @@ export function signInWithProviderCredential(
   if (existingUser?.isAnonymous) {
     return linkWithCredential(existingUser, credential);
   }
+  return signInWithCredential(auth, credential);
+}
+
+export function signInWithProviderCredentialDirect(
+  credential: AuthCredential,
+): Promise<UserCredential> {
   return signInWithCredential(auth, credential);
 }
 

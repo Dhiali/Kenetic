@@ -4,13 +4,15 @@ import React, { useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import {
-  bootstrapAnonymousUser,
   persistOnboardingCompletion,
   registerUserAccount,
+  restoreSignedInAccount,
 } from "./src/lib/firebase/bootstrap";
+import AlienModeScreen from "./src/screens/AlienModeScreen";
 import BreatheDashboard from "./src/screens/BreatheDashboard";
 import Dashboard from "./src/screens/Dashboard";
 import FocusDashboard from "./src/screens/FocusDashboard";
+import GsdSetupScreen from "./src/screens/GsdSetupScreen";
 import IntakeCarousel from "./src/screens/IntakeCarousel";
 import LoginScreen from "./src/screens/LoginScreen";
 import OnboardingScreen from "./src/screens/OnboardingScreen";
@@ -40,9 +42,18 @@ function ComingSoon({ label, onBack }: { label: string; onBack: () => void }) {
 
 export default function App() {
   const [currentScreen, setCurrentScreen] = useState<ScreenState>("SPLASH");
+  const [showNotificationPrompt, setShowNotificationPrompt] = useState(true);
+  const restoredAccount = React.useRef(false);
 
   React.useEffect(() => {
-    void bootstrapAnonymousUser().catch(() => undefined);
+    void restoreSignedInAccount()
+      .then((user) => {
+        if (user) {
+          restoredAccount.current = true;
+          setCurrentScreen("DASHBOARD");
+        }
+      })
+      .catch(() => undefined);
   }, []);
 
   const goTo = (s: ScreenState) => setCurrentScreen(s);
@@ -50,7 +61,13 @@ export default function App() {
   const renderScreen = () => {
     switch (currentScreen) {
       case "SPLASH":
-        return <SplashScreen onComplete={() => goTo("FORK")} />;
+        return (
+          <SplashScreen
+            onComplete={() => {
+              if (!restoredAccount.current) goTo("FORK");
+            }}
+          />
+        );
       case "FORK":
         return (
           <TheFork
@@ -59,7 +76,15 @@ export default function App() {
           />
         );
       case "LOGIN":
-        return <LoginScreen onComplete={() => goTo("DASHBOARD")} />;
+        return (
+          <LoginScreen
+            onComplete={() => {
+              setShowNotificationPrompt(false);
+              goTo("DASHBOARD");
+            }}
+            onBack={() => goTo("FORK")}
+          />
+        );
       case "SIGNUP":
         return (
           <SignupScreen
@@ -78,6 +103,7 @@ export default function App() {
           <OnboardingScreen
             onComplete={() => {
               void persistOnboardingCompletion().catch(() => undefined);
+              setShowNotificationPrompt(true);
               goTo("DASHBOARD");
             }}
           />
@@ -89,13 +115,14 @@ export default function App() {
             onFocus={() => goTo("FOCUS")}
             onBreathe={() => goTo("BREATHE_DASHBOARD")}
             onOutdoors={() => goTo("OUTDOORS_DASHBOARD")}
+            showNotificationPrompt={showNotificationPrompt}
           />
         );
       case "PROFILE":
         return (
           <ProfileScreen
             onBack={() => goTo("DASHBOARD")}
-            onLogout={() => goTo("SPLASH")}
+            onLogout={() => goTo("LOGIN")}
           />
         );
       // ---- Coming in phase 2/3 ----
@@ -108,23 +135,9 @@ export default function App() {
           />
         );
       case "GSD_SETUP":
-        return (
-          <FeatureDetail
-            title="get shit done."
-            label="sound tether & app lock"
-            description="Connect Apple Music or Spotify, start background audio, and protect your focus session."
-            onBack={() => goTo("FOCUS")}
-          />
-        );
+        return <GsdSetupScreen onBack={() => goTo("FOCUS")} />;
       case "ALIEN_MODE":
-        return (
-          <FeatureDetail
-            title="alien mode."
-            label="ai task deconstructor"
-            description="Break an overwhelming task into one clear first action with a beginner's mind."
-            onBack={() => goTo("FOCUS")}
-          />
-        );
+        return <AlienModeScreen onBack={() => goTo("FOCUS")} />;
       case "GSD_TETHER":
       case "GSD_PENALTY":
         return (

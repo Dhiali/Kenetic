@@ -1,15 +1,20 @@
 import {
-  bootstrapAnonymousUser,
   getNotificationPreference,
+  loadFocusDashboardMetrics,
   persistDashboardSelection,
+  persistFocusFeatureLaunch,
   persistNotificationPreference,
   persistOnboardingCompletion,
   registerUserAccount,
+  restoreSignedInAccount,
   syncNotificationDevice,
 } from "@/lib/firebase/bootstrap";
+import AlienModeScreen from "@/screens/AlienModeScreen";
 import BreatheDashboard from "@/screens/BreatheDashboard";
 import DashboardScreen from "@/screens/Dashboard";
+import GsdSetupScreen from "@/screens/GsdSetupScreen";
 import IntakeCarousel from "@/screens/IntakeCarousel";
+import LoginScreen from "@/screens/LoginScreen";
 import OnboardingScreen from "@/screens/OnboardingScreen";
 import OutdoorsDashboard from "@/screens/OutdoorsDashboard";
 import ProfileScreen from "@/screens/ProfileScreen";
@@ -17,7 +22,7 @@ import SignupScreen from "@/screens/SignupScreen";
 import { BlurView } from "expo-blur";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   KeyboardAvoidingView,
   Platform,
@@ -84,13 +89,25 @@ const triggerNotification = (type: Haptics.NotificationFeedbackType) => {
 export default function Index() {
   const [screen, setScreen] = useState<Screen>("SPLASH");
   const [name, setName] = useState("Jane Doe");
+  const [showNotificationPrompt, setShowNotificationPrompt] = useState(true);
+  const restoredAccount = useRef(false);
   const go = (next: Screen) => {
     Haptics.selectionAsync().catch(() => undefined);
     setScreen(next);
   };
   useEffect(() => {
-    void bootstrapAnonymousUser().catch(() => undefined);
-    const timer = setTimeout(() => setScreen("FORK"), 4000);
+    const timer = setTimeout(() => {
+      if (!restoredAccount.current) setScreen("FORK");
+    }, 4000);
+    void restoreSignedInAccount()
+      .then((user) => {
+        if (user) {
+          restoredAccount.current = true;
+          clearTimeout(timer);
+          setScreen("DASHBOARD");
+        }
+      })
+      .catch(() => undefined);
     return () => clearTimeout(timer);
   }, []);
   if (screen === "SPLASH") return <Splash />;
@@ -98,10 +115,12 @@ export default function Index() {
     return <Fork onLogin={() => go("LOGIN")} onSignup={() => go("SIGNUP")} />;
   if (screen === "LOGIN")
     return (
-      <Auth
-        title="return."
-        button="jump to dashboard"
-        onComplete={() => go("DASHBOARD")}
+      <LoginScreen
+        onComplete={() => {
+          setShowNotificationPrompt(false);
+          go("DASHBOARD");
+        }}
+        onBack={() => go("FORK")}
       />
     );
   if (screen === "SIGNUP")
@@ -125,6 +144,7 @@ export default function Index() {
         <OnboardingScreen
           onComplete={() => {
             void persistOnboardingCompletion().catch(() => undefined);
+            setShowNotificationPrompt(true);
             go("DASHBOARD");
           }}
         />
@@ -135,7 +155,7 @@ export default function Index() {
     return (
       <ProfileScreen
         onBack={() => go("DASHBOARD")}
-        onLogout={() => go("SPLASH")}
+        onLogout={() => go("LOGIN")}
       />
     );
   if (screen === "FOCUS")
@@ -147,35 +167,9 @@ export default function Index() {
       />
     );
   if (screen === "GSD_SETUP")
-    return (
-      <FeatureList
-        title="get shit done."
-        accent="#e11d48"
-        onBack={() => go("FOCUS")}
-        items={[
-          {
-            title: "sound tether & app lock",
-            description:
-              "Connect Apple Music or Spotify and protect your focus session.",
-          },
-        ]}
-      />
-    );
+    return <GsdSetupScreen onBack={() => go("FOCUS")} />;
   if (screen === "ALIEN_MODE")
-    return (
-      <FeatureList
-        title="alien mode."
-        accent="#e11d48"
-        onBack={() => go("FOCUS")}
-        items={[
-          {
-            title: "ai task deconstructor",
-            description:
-              "Turn an overwhelming task into one clear first action.",
-          },
-        ]}
-      />
-    );
+    return <AlienModeScreen onBack={() => go("FOCUS")} />;
   if (screen === "BREATHE")
     return (
       <BreatheDashboard
@@ -230,6 +224,7 @@ export default function Index() {
       onFocus={() => go("FOCUS")}
       onBreathe={() => go("BREATHE")}
       onOutdoors={() => go("OUTDOORS")}
+      showNotificationPrompt={showNotificationPrompt}
     />
   );
 }
@@ -477,7 +472,7 @@ function Auth({
           {onBack && (
             <GestureDetector gesture={backGesture}>
               <Animated.Text style={[styles.authBackLink, backStyle]}>
-                ← where to?
+                where to? →
               </Animated.Text>
             </GestureDetector>
           )}
@@ -503,11 +498,13 @@ function Dashboard({
   onFocus,
   onBreathe,
   onOutdoors,
+  showNotificationPrompt = true,
 }: {
   onProfile: () => void;
   onFocus: () => void;
   onBreathe: () => void;
   onOutdoors: () => void;
+  showNotificationPrompt?: boolean;
 }) {
   const [selected, setSelected] = useState<string | null>(null);
   const [selectionError, setSelectionError] = useState<string | null>(null);
@@ -520,7 +517,7 @@ function Dashboard({
     void getNotificationPreference()
       .then((preference) => {
         if (!mounted) return;
-        setShowBoundary(preference === undefined);
+        setShowBoundary(showNotificationPrompt && preference === undefined);
         if (preference === "sure") void syncNotificationDevice();
       })
       .catch(() => {
@@ -841,12 +838,25 @@ function Focus({
   onGetShitDone: () => void;
   onAlienMode: () => void;
 }) {
+  const [focusMetrics, setFocusMetrics] = useState({
+    completedSessions: 0,
+    getShitDoneSessions: 0,
+    alienModeSessions: 0,
+    handoffCompletedSessions: 0,
+    getShitDoneMinutes: 0,
+    alienModeMinutes: 0,
+    totalFocusMinutes: 0,
+  });
+  const [focusLaunchError, setFocusLaunchError] = useState<string | null>(null);
   const auraScale = useSharedValue(1);
   const auraMorph = useSharedValue(0);
   const auraExpand = useSharedValue(0);
   const exitTranslateX = useSharedValue(0);
 
   useEffect(() => {
+    void loadFocusDashboardMetrics()
+      .then(setFocusMetrics)
+      .catch(() => undefined);
     auraScale.value = withRepeat(
       withSequence(
         withTiming(1.08, { duration: 2600, easing: Easing.inOut(Easing.ease) }),
@@ -893,6 +903,19 @@ function Focus({
     transform: [{ translateX: exitTranslateX.value }],
   }));
 
+  const launchFocusFeature = async (
+    feature: "get-shit-done" | "alien-mode",
+    action: () => void,
+  ) => {
+    setFocusLaunchError(null);
+    try {
+      await persistFocusFeatureLaunch(feature);
+      action();
+    } catch {
+      setFocusLaunchError("Could not save this focus choice. Try again.");
+    }
+  };
+
   return (
     <ScreenFrame>
       <Animated.View
@@ -925,17 +948,43 @@ function Focus({
           </GestureDetector>
           <Text style={styles.focusTitle}>focus state.</Text>
           <View style={styles.focusMetrics}>
-            <FocusMetric value="3.5h" label="deep session total today" />
-            <FocusMetric value="88%" label="off-screen tether score" />
-            <FocusMetric value="12" label="tasks deconstructed" />
+            <FocusMetric
+              value={`${focusMetrics.completedSessions}`}
+              label="completed sessions"
+            />
+            <FocusMetric
+              value={`${focusMetrics.totalFocusMinutes}m`}
+              label="focus time completed"
+            />
+            <FocusMetric
+              value={`${focusMetrics.getShitDoneSessions}`}
+              label="get shit done sessions"
+            />
+            <FocusMetric
+              value={`${focusMetrics.alienModeSessions}`}
+              label="alien mode sessions"
+            />
+            <FocusMetric
+              value={`${focusMetrics.alienModeMinutes}m`}
+              label="alien mode time completed"
+            />
+            <FocusMetric
+              value={`${focusMetrics.handoffCompletedSessions}`}
+              label="two-minute handoffs completed"
+            />
           </View>
+          {focusLaunchError && (
+            <Text style={styles.focusLaunchError}>{focusLaunchError}</Text>
+          )}
           <View style={styles.focusGateways}>
             <FocusGateway
               title="get shit done."
               label="sound tether & app lock"
               description="Connects Apple Music or Spotify. Activates background audio and automatically pauses playback if you stay actively on your phone for more than 2 minutes."
               auraExpand={auraExpand}
-              onLaunch={onGetShitDone}
+              onLaunch={() =>
+                void launchFocusFeature("get-shit-done", onGetShitDone)
+              }
             />
             <FocusGateway
               title="alien mode."
@@ -944,7 +993,9 @@ function Focus({
                 'Intercepts overwhelming tasks and prompts you with a "Beginner\'s Mind" question to reframe your perspective before the timer begins.'
               }
               auraExpand={auraExpand}
-              onLaunch={onAlienMode}
+              onLaunch={() =>
+                void launchFocusFeature("alien-mode", onAlienMode)
+              }
             />
           </View>
         </ScrollView>
@@ -1374,6 +1425,12 @@ const styles = StyleSheet.create({
   focusMetrics: {
     gap: 18,
     marginBottom: 64,
+  },
+  focusLaunchError: {
+    color: "#fca5a5",
+    fontSize: 12,
+    lineHeight: 18,
+    marginBottom: 18,
   },
   focusMetric: {
     flexDirection: "row",
