@@ -1,3 +1,4 @@
+import { BlurView } from "expo-blur";
 import {
     CameraView,
     useCameraPermissions,
@@ -30,6 +31,7 @@ import Animated, {
 } from "react-native-reanimated";
 import {
     finishBioRadarSession,
+    loadOutdoorQuizQueue,
     persistOutdoorFeatureLaunch,
     persistOutdoorQuizResult,
     persistOutdoorScan,
@@ -87,25 +89,56 @@ const SPECIES_LIBRARY: Species[] = [
   },
 ];
 
-const QUIZ_QUESTIONS = [
-  {
-    prompt: "Why do mosses thrive on the shaded side of a tree?",
-    answer:
-      "They retain moisture more easily where direct sun and wind are reduced.",
+const QUESTION_BANK: Record<
+  string,
+  { prompt: string; options: string[]; correctIndex: number; fact: string }
+> = {
+  "EUROPEAN ROBIN": {
+    prompt: "How does the European Robin navigate?",
+    options: [
+      "tracking the sun's position",
+      "using a magnetic compass in its eye",
+      "following seasonal wind patterns",
+    ],
+    correctIndex: 1,
+    fact: "It navigates using a magnetic compass sensitive to blue light.",
   },
-  {
-    prompt: "What does a mixed woodland canopy provide?",
-    answer: "Different layers of food and shelter for many species.",
+  "COMMON OAK": {
+    prompt: "What lets an old oak support so much biodiversity?",
+    options: [
+      "its fast yearly growth rate",
+      "decades of accumulated bark texture and hollows",
+      "chemicals released from its acorns",
+    ],
+    correctIndex: 1,
+    fact: "An old oak can host more biodiversity than a young mixed woodland patch.",
   },
-  {
-    prompt: "Why leave fallen logs on the forest floor?",
-    answer:
-      "They return nutrients and create habitat for insects, fungi, and small animals.",
+  "RED FOX": {
+    prompt: "What aid does the red fox use while hunting?",
+    options: [
+      "echolocation clicks",
+      "infrared vision",
+      "the Earth's magnetic field",
+    ],
+    correctIndex: 2,
+    fact: "It uses the Earth's magnetic field as an aiming aid while hunting.",
   },
-];
+};
+
+const FALLBACK_QUESTION = {
+  prompt: "What role does this discovery play in its ecosystem?",
+  options: [
+    "it has no measurable ecological role",
+    "it supports surrounding species and habitat balance",
+    "it only appears in captivity",
+  ],
+  correctIndex: 1,
+  fact: "Every logged discovery contributes to the balance of its habitat.",
+};
 
 export default function OutdoorFeatureScreen({ feature, onBack }: Props) {
   if (feature === "bio-radar") return <BioRadarExperience onBack={onBack} />;
+  if (feature === "quizzes") return <QuizzesExperience onBack={onBack} />;
 
   const exitX = useSharedValue(0);
   const exit = Gesture.Pan()
@@ -122,6 +155,10 @@ export default function OutdoorFeatureScreen({ feature, onBack }: Props) {
     transform: [{ translateX: exitX.value }],
   }));
 
+  useEffect(() => {
+    void persistOutdoorFeatureLaunch(feature).catch(() => undefined);
+  }, [feature]);
+
   return (
     <GestureDetector gesture={exit}>
       <Animated.View
@@ -136,7 +173,6 @@ export default function OutdoorFeatureScreen({ feature, onBack }: Props) {
             <Text style={styles.back}>&lt;- outdoors</Text>
           </Pressable>
           <Text style={styles.eyebrow}>{feature.replace("-", " ")}</Text>
-          {feature === "quizzes" && <Quizzes />}
           {feature === "spot-finder" && (
             <ComingSoonFeature title="spot finder." />
           )}
@@ -710,70 +746,451 @@ function BioRadarExperience({ onBack }: { onBack: () => void }) {
   );
 }
 
-function Quizzes() {
-  const [index, setIndex] = useState(0);
-  const [revealed, setRevealed] = useState(false);
+type QuizItem = {
+  scanId: string;
+  title: string;
+  scientificName?: string;
+  capturedAssetUri?: string;
+  prompt: string;
+  options: string[];
+  correctIndex: number;
+  fact: string;
+};
+
+function QuizzesExperience({ onBack }: { onBack: () => void }) {
+  const [loading, setLoading] = useState(true);
+  const [queue, setQueue] = useState<QuizItem[]>([]);
+  const [queueIndex, setQueueIndex] = useState(0);
+  const [stage, setStage] = useState<
+    "lobby" | "question" | "synthesis" | "retained"
+  >("lobby");
+  const [selectedOption, setSelectedOption] = useState<number | null>(null);
+  const [correct, setCorrect] = useState<boolean | null>(null);
+  const [showFact, setShowFact] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [reloadToken, setReloadToken] = useState(0);
 
-  const next = () => {
-    setIndex((index + 1) % QUIZ_QUESTIONS.length);
-    setRevealed(false);
-    Haptics.selectionAsync().catch(() => undefined);
+  const exitX = useSharedValue(0);
+  const transitionX = useSharedValue(0);
+  const recallY = useSharedValue(0);
+  const waveOpacity = useSharedValue(0);
+  const retainedY = useSharedValue(0);
+  const option0Y = useSharedValue(0);
+  const option1Y = useSharedValue(0);
+  const option2Y = useSharedValue(0);
+  const optionYs = [option0Y, option1Y, option2Y];
+  const poolPulse = useSharedValue(0);
+  const truthPulse = useSharedValue(0);
+
+  useEffect(() => {
+    poolPulse.value = withRepeat(
+      withSequence(
+        withTiming(1, { duration: 2400, easing: Easing.inOut(Easing.ease) }),
+        withTiming(0, { duration: 2400, easing: Easing.inOut(Easing.ease) }),
+      ),
+      -1,
+      true,
+    );
+    truthPulse.value = withRepeat(
+      withSequence(
+        withTiming(1, { duration: 1500, easing: Easing.inOut(Easing.ease) }),
+        withTiming(0, { duration: 1500, easing: Easing.inOut(Easing.ease) }),
+      ),
+      -1,
+      true,
+    );
+  }, []);
+
+  useEffect(() => {
+    void persistOutdoorFeatureLaunch("quizzes").catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setLoadFailed(false);
+    loadOutdoorQuizQueue()
+      .then((records) => {
+        if (cancelled) return;
+        const items: QuizItem[] = records.map((record) => {
+          const question = QUESTION_BANK[record.title] ?? FALLBACK_QUESTION;
+          return { ...record, ...question };
+        });
+        setQueue(items);
+        setQueueIndex(0);
+        setStage("lobby");
+        setError("");
+      })
+      .catch((caught) => {
+        if (cancelled) return;
+        setLoadFailed(true);
+        setError(firebaseErrorMessage(caught));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [reloadToken]);
+
+  const triggerLight = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(
+      () => undefined,
+    );
+  };
+  const triggerHeavy = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(
+      () => undefined,
+    );
+  };
+  const triggerSuccess = () => {
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
+      () => undefined,
+    );
+  };
+  const triggerWarning = () => {
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(
+      () => undefined,
+    );
+    setTimeout(triggerLight, 140);
+  };
+  const triggerError = () => {
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(
+      () => undefined,
+    );
   };
 
-  const question = QUIZ_QUESTIONS[index];
+  const retryLoad = () => {
+    triggerLight();
+    setReloadToken((value) => value + 1);
+  };
 
-  const submitResult = async (correct: boolean) => {
-    if (saving) return;
+  const currentItem = queue[queueIndex];
+
+  const beginRecall = () => {
+    if (!currentItem) return;
+    triggerHeavy();
+    setStage("question");
+    setSelectedOption(null);
+    setCorrect(null);
+    setShowFact(false);
+  };
+
+  const recallGesture = Gesture.Pan()
+    .enabled(stage === "lobby" && !!currentItem)
+    .onUpdate((event) => {
+      if (event.translationY > 0) recallY.value = event.translationY;
+    })
+    .onEnd(() => {
+      if (recallY.value > 70) {
+        recallY.value = withTiming(160, { duration: 220 });
+        runOnJS(beginRecall)();
+        return;
+      }
+      recallY.value = withSpring(0);
+    });
+
+  const chooseOption = (optionIndex: number) => {
+    if (!currentItem || stage !== "question") return;
+    const isCorrect = optionIndex === currentItem.correctIndex;
+    setSelectedOption(optionIndex);
+    setCorrect(isCorrect);
+    setStage("synthesis");
+    waveOpacity.value = withSequence(
+      withTiming(1, { duration: 180 }),
+      withTiming(0, { duration: 700 }),
+    );
+    if (isCorrect) triggerSuccess();
+    else triggerWarning();
+    setTimeout(() => setShowFact(true), 420);
+  };
+
+  const makeOptionGesture = (optionIndex: number) =>
+    Gesture.Pan()
+      .enabled(stage === "question")
+      .onBegin(() => runOnJS(triggerLight)())
+      .onUpdate((event) => {
+        optionYs[optionIndex].value = event.translationY;
+      })
+      .onEnd(() => {
+        if (optionYs[optionIndex].value < -70) {
+          optionYs[optionIndex].value = withTiming(-140, { duration: 180 });
+          runOnJS(chooseOption)(optionIndex);
+          return;
+        }
+        optionYs[optionIndex].value = withSpring(0);
+      });
+
+  const option0Gesture = makeOptionGesture(0);
+  const option1Gesture = makeOptionGesture(1);
+  const option2Gesture = makeOptionGesture(2);
+  const optionGestures = [option0Gesture, option1Gesture, option2Gesture];
+
+  const advanceQueue = () => {
+    const applyAdvance = () => {
+      setQueueIndex((current) => current + 1);
+      setStage("lobby");
+      setSelectedOption(null);
+      setCorrect(null);
+      setShowFact(false);
+      recallY.value = 0;
+      option0Y.value = 0;
+      option1Y.value = 0;
+      option2Y.value = 0;
+      retainedY.value = 0;
+    };
+    transitionX.value = withTiming(-420, { duration: 260 }, (finished) => {
+      if (!finished) return;
+      runOnJS(applyAdvance)();
+      transitionX.value = 420;
+      transitionX.value = withTiming(0, { duration: 260 });
+    });
+  };
+
+  const commitRetention = async () => {
+    if (saving || !currentItem || correct === null) return;
     setSaving(true);
     setError("");
     try {
       await persistOutdoorQuizResult({
-        questionId: `curiosity-${index + 1}`,
-        prompt: question.prompt,
+        questionId: `scan-${currentItem.scanId}`,
+        prompt: currentItem.prompt,
         correct,
       });
-      next();
+      triggerHeavy();
+      advanceQueue();
     } catch (caught) {
+      triggerError();
       setError(firebaseErrorMessage(caught));
     } finally {
       setSaving(false);
     }
   };
 
+  const retainedGesture = Gesture.Pan()
+    .enabled(showFact && !saving)
+    .onUpdate((event) => {
+      if (event.translationY > 0) retainedY.value = event.translationY;
+    })
+    .onEnd(() => {
+      if (retainedY.value > 55) {
+        retainedY.value = withTiming(90, { duration: 180 });
+        runOnJS(commitRetention)();
+        return;
+      }
+      retainedY.value = withSpring(0);
+    });
+
+  const exitGesture = Gesture.Pan()
+    .activeOffsetX(10)
+    .onUpdate((event) => {
+      if (event.translationX > 0) exitX.value = event.translationX;
+    })
+    .onEnd((event) => {
+      if (event.translationX > 90) runOnJS(onBack)();
+      else exitX.value = withSpring(0);
+    });
+
+  const rootStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: exitX.value + transitionX.value }],
+  }));
+  const recallStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: recallY.value }],
+  }));
+  const waveStyle = useAnimatedStyle(() => ({ opacity: waveOpacity.value }));
+  const retainedStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: retainedY.value }],
+  }));
+  const option0Style = useAnimatedStyle(() => ({
+    transform: [{ translateY: option0Y.value }],
+  }));
+  const option1Style = useAnimatedStyle(() => ({
+    transform: [{ translateY: option1Y.value }],
+  }));
+  const option2Style = useAnimatedStyle(() => ({
+    transform: [{ translateY: option2Y.value }],
+  }));
+  const optionStyles = [option0Style, option1Style, option2Style];
+  const poolStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(poolPulse.value, [0, 1], [0.82, 1]),
+  }));
+  const truthGlowStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(truthPulse.value, [0, 1], [0.45, 0.9]),
+    transform: [
+      { scale: interpolate(truthPulse.value, [0, 1], [0.92, 1.18]) },
+      { scaleX: interpolate(truthPulse.value, [0, 1], [1, 1.08]) },
+      { scaleY: interpolate(truthPulse.value, [0, 1], [1.06, 0.96]) },
+    ],
+  }));
+
+  const remaining = Math.max(0, queue.length - queueIndex);
+  const navOnLight = !!currentItem && stage !== "lobby";
+
   return (
-    <FeaturePanel
-      title="curiosity quizzes."
-      subtitle="adaptive knowledge retention"
+    <Animated.View
+      style={[styles.quizRoot, rootStyle]}
+      entering={FadeIn.duration(360)}
     >
-      <Text style={styles.question}>{question.prompt}</Text>
-      {revealed && <Text style={styles.answer}>{question.answer}</Text>}
-      <Action
-        title={revealed ? "Next question" : "Reveal answer"}
-        onPress={revealed ? next : () => setRevealed(true)}
-        disabled={saving}
-      />
-      {revealed && (
-        <View style={styles.row}>
-          <Action
-            title={saving ? "Saving..." : "I got it right"}
-            onPress={() => void submitResult(true)}
-            disabled={saving}
-          />
-          <Action
-            title="Need review"
-            onPress={() => void submitResult(false)}
-            disabled={saving}
-          />
+      <GestureDetector gesture={exitGesture}>
+        <View style={styles.quizNavRow}>
+          <Pressable onPress={onBack} hitSlop={12}>
+            <Text style={navOnLight ? styles.quizNavBackDark : styles.bioBack}>
+              &lt;- outdoors
+            </Text>
+          </Pressable>
+          <Text style={navOnLight ? styles.quizNavHintDark : styles.bioHint}>
+            (drag right to return)
+          </Text>
+        </View>
+      </GestureDetector>
+
+      {loading && (
+        <View style={styles.quizLoadingLayer}>
+          <Text style={styles.quizLoadingText}>loading queue...</Text>
         </View>
       )}
-      <Text style={styles.muted}>
-        Question {index + 1} of {QUIZ_QUESTIONS.length} - drawn from your field
-        learning path.
-      </Text>
-      {!!error && <Text style={styles.error}>{error}</Text>}
-    </FeaturePanel>
+
+      {!loading && loadFailed && (
+        <View style={styles.quizEmptyLayer}>
+          <Text style={styles.quizTitle}>curiosity quizzes.</Text>
+          <Text style={styles.quizSubtitle}>
+            couldn't reach your discovery ledger.
+          </Text>
+          <Pressable onPress={retryLoad} hitSlop={12}>
+            <Text style={styles.quizRetryText}>tap to retry</Text>
+          </Pressable>
+        </View>
+      )}
+
+      {!loading && !loadFailed && !currentItem && (
+        <View style={styles.quizEmptyLayer}>
+          <Text style={styles.quizTitle}>curiosity quizzes.</Text>
+          <Text style={styles.quizSubtitle}>
+            no discoveries waiting for recall.
+          </Text>
+          <Text style={styles.quizEmptyHint}>
+            flag a species as "include in daily quizzes" during your next bio
+            radar scan.
+          </Text>
+        </View>
+      )}
+
+      {!loading && !loadFailed && currentItem && stage === "lobby" && (
+        <View style={styles.quizLobbyLayer}>
+          <Text style={styles.quizTitle}>curiosity quizzes.</Text>
+          <Text style={styles.quizSubtitle}>
+            {remaining} discoveries waiting for recall
+          </Text>
+          <Animated.View style={[styles.quizSandPool, poolStyle]}>
+            <LinearGradient
+              colors={[
+                "rgba(214,178,120,0.15)",
+                "rgba(214,178,120,0.55)",
+                "rgba(176,132,82,0.7)",
+              ]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 0, y: 1 }}
+              style={StyleSheet.absoluteFillObject}
+            />
+          </Animated.View>
+          <GestureDetector gesture={recallGesture}>
+            <Animated.Text style={[styles.quizRecallText, recallStyle]}>
+              drag to recall
+            </Animated.Text>
+          </GestureDetector>
+        </View>
+      )}
+
+      {!loading && currentItem && stage !== "lobby" && (
+        <View style={styles.quizQuestionLayer}>
+          {currentItem.capturedAssetUri ? (
+            <Image
+              source={{ uri: currentItem.capturedAssetUri }}
+              style={StyleSheet.absoluteFillObject}
+              blurRadius={stage === "question" ? 22 : 0}
+            />
+          ) : (
+            <View style={styles.quizImageFallback} />
+          )}
+          {stage === "question" && (
+            <BlurView
+              intensity={55}
+              tint="light"
+              style={StyleSheet.absoluteFillObject}
+            />
+          )}
+          <View style={styles.quizScrim} pointerEvents="none" />
+
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              styles.quizWave,
+              waveStyle,
+              { backgroundColor: correct ? "#16a34a" : "#f97316" },
+            ]}
+          />
+
+          {stage === "question" && (
+            <View style={styles.quizQuestionContent}>
+              <Text style={styles.quizPrompt}>{currentItem.prompt}</Text>
+              <View style={styles.quizTruthWrap}>
+                <Animated.View
+                  pointerEvents="none"
+                  style={[styles.quizTruthGlow, truthGlowStyle]}
+                >
+                  <LinearGradient
+                    colors={[
+                      "rgba(22,163,74,0.55)",
+                      "rgba(22,163,74,0.12)",
+                      "rgba(22,163,74,0)",
+                    ]}
+                    style={StyleSheet.absoluteFillObject}
+                  />
+                </Animated.View>
+                <View style={styles.quizTruthCircle}>
+                  <Text style={styles.quizTruthCircleText}>
+                    drag truth here
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.quizOptionsList}>
+                {currentItem.options.map((option, optionIndex) => (
+                  <GestureDetector
+                    key={option}
+                    gesture={optionGestures[optionIndex]}
+                  >
+                    <Animated.Text
+                      style={[styles.quizOptionText, optionStyles[optionIndex]]}
+                    >
+                      {String.fromCharCode(97 + optionIndex)}. {option}
+                    </Animated.Text>
+                  </GestureDetector>
+                ))}
+              </View>
+            </View>
+          )}
+
+          {stage === "synthesis" && showFact && (
+            <View style={styles.quizFactLayer}>
+              <Text style={styles.quizFactText}>{currentItem.fact}</Text>
+              <View style={styles.retentionRow}>
+                <Text style={styles.retainedOutline}>RETAINED</Text>
+                <GestureDetector gesture={retainedGesture}>
+                  <Animated.Text style={[styles.retainedActive, retainedStyle]}>
+                    {saving ? "saving..." : "retained"}
+                  </Animated.Text>
+                </GestureDetector>
+              </View>
+            </View>
+          )}
+        </View>
+      )}
+
+      {!!error && <Text style={styles.quizError}>{error}</Text>}
+    </Animated.View>
   );
 }
 
@@ -1098,5 +1515,188 @@ const styles = StyleSheet.create({
     height: 64,
     zIndex: 15,
     backgroundColor: "transparent",
+  },
+  quizRoot: { flex: 1, backgroundColor: "#0a0a0a" },
+  quizNavRow: {
+    position: "absolute",
+    top: 128,
+    left: 22,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    zIndex: 10,
+  },
+  quizNavBackDark: { color: "#0a0a0a", fontSize: 14, fontWeight: "700" },
+  quizNavHintDark: { color: "rgba(10,10,10,0.5)", fontSize: 12 },
+  quizLobbyLayer: {
+    flex: 1,
+    paddingHorizontal: 28,
+    paddingTop: 210,
+  },
+  quizLoadingLayer: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 28,
+  },
+  quizEmptyLayer: {
+    flex: 1,
+    justifyContent: "center",
+    paddingHorizontal: 28,
+    paddingBottom: 60,
+  },
+  quizLoadingText: {
+    color: "rgba(255,255,255,0.6)",
+    fontSize: 14,
+    textAlign: "center",
+  },
+  quizTitle: {
+    color: "#fff",
+    fontSize: 46,
+    lineHeight: 48,
+    fontWeight: "900",
+    letterSpacing: -1.5,
+  },
+  quizSubtitle: {
+    color: "rgba(226,232,240,0.72)",
+    fontSize: 15,
+    marginTop: 10,
+    marginBottom: 24,
+  },
+  quizEmptyHint: {
+    color: "rgba(226,232,240,0.5)",
+    fontSize: 13,
+    lineHeight: 20,
+    marginTop: 14,
+  },
+  quizRetryText: {
+    color: "#84cc16",
+    fontSize: 14,
+    fontWeight: "800",
+    textTransform: "uppercase",
+    letterSpacing: 1,
+    marginTop: 18,
+  },
+  quizSandPool: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: "32%",
+    borderTopLeftRadius: 46,
+    borderTopRightRadius: 46,
+    overflow: "hidden",
+  },
+  quizRecallText: {
+    position: "absolute",
+    bottom: "42%",
+    left: 0,
+    right: 0,
+    textAlign: "center",
+    color: "rgba(226,232,240,0.85)",
+    fontSize: 16,
+    fontWeight: "700",
+    textTransform: "lowercase",
+    letterSpacing: 0.5,
+  },
+  quizQuestionLayer: { flex: 1 },
+  quizImageFallback: { flex: 1, backgroundColor: "#e5e5e0" },
+  quizScrim: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(250,250,247,0.88)",
+  },
+  quizWave: { ...StyleSheet.absoluteFillObject },
+  quizQuestionContent: {
+    flex: 1,
+    paddingHorizontal: 26,
+    paddingTop: 140,
+  },
+  quizPrompt: {
+    color: "#0a0a0a",
+    fontSize: 34,
+    lineHeight: 40,
+    fontWeight: "900",
+    letterSpacing: -1,
+    textAlign: "center",
+    marginBottom: 30,
+  },
+  quizTruthWrap: {
+    alignSelf: "center",
+    width: 150,
+    height: 150,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 30,
+  },
+  quizTruthGlow: {
+    position: "absolute",
+    width: 210,
+    height: 210,
+    borderRadius: 105,
+  },
+  quizTruthCircle: {
+    width: 150,
+    height: 150,
+    borderRadius: 75,
+    borderWidth: 1,
+    borderColor: "rgba(10,10,10,0.28)",
+    backgroundColor: "rgba(250,250,247,0.6)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  quizTruthCircleText: {
+    color: "rgba(10,10,10,0.5)",
+    fontSize: 12,
+    fontWeight: "700",
+    textTransform: "lowercase",
+  },
+  quizOptionsList: { gap: 22 },
+  quizOptionText: {
+    color: "#0a0a0a",
+    fontSize: 17,
+    fontWeight: "600",
+    textAlign: "left",
+  },
+  quizFactLayer: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 30,
+  },
+  quizFactText: {
+    color: "#0a0a0a",
+    fontSize: 24,
+    lineHeight: 32,
+    fontWeight: "800",
+    textAlign: "center",
+    marginBottom: 50,
+  },
+  retentionRow: { alignItems: "center" },
+  retainedOutline: {
+    color: "rgba(10,10,10,0.28)",
+    fontSize: 13,
+    fontWeight: "800",
+    letterSpacing: 1.5,
+  },
+  retainedActive: {
+    position: "absolute",
+    color: "#16a34a",
+    fontSize: 16,
+    fontWeight: "800",
+    textTransform: "lowercase",
+    top: -30,
+  },
+  quizError: {
+    color: "#fecaca",
+    position: "absolute",
+    bottom: 40,
+    left: 24,
+    right: 24,
+    textAlign: "center",
+    backgroundColor: "rgba(10,10,10,0.72)",
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    overflow: "hidden",
   },
 });

@@ -26,6 +26,7 @@ import {
     getBreatheDashboardMetrics,
     getFocusDashboardMetrics,
     getOutdoorDashboardMetrics,
+    getQuizQueue,
     getUserProfile,
     markOnboardingComplete,
     saveChallengeProgress,
@@ -288,6 +289,11 @@ export async function loadBreatheDashboardMetrics() {
 export async function loadOutdoorDashboardMetrics() {
   const user = await ensureAnonymousUser();
   return getOutdoorDashboardMetrics(user.uid);
+}
+
+export async function loadOutdoorQuizQueue() {
+  const user = await ensureAnonymousUser();
+  return getQuizQueue(user.uid);
 }
 
 export async function persistBreatheExerciseLaunch(

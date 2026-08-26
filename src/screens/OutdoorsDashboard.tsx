@@ -2,7 +2,7 @@ import { BlurView } from "expo-blur";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import React, { useEffect } from "react";
-import { ScrollView, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
     Easing,
@@ -40,14 +40,27 @@ export default function OutdoorsDashboard({
     activeLearningDays: 0,
   });
   const [metricsError, setMetricsError] = React.useState(false);
+  const [reloadToken, setReloadToken] = React.useState(0);
   const auraScale = useSharedValue(1);
   const auraMorph = useSharedValue(0);
   const exitX = useSharedValue(0);
+  const metricsReveal = useSharedValue(0);
 
   useEffect(() => {
+    metricsReveal.value = 0;
     void loadOutdoorDashboardMetrics()
-      .then(setMetrics)
+      .then((result) => {
+        setMetrics(result);
+        setMetricsError(false);
+        metricsReveal.value = withTiming(1, {
+          duration: 520,
+          easing: Easing.out(Easing.cubic),
+        });
+      })
       .catch(() => setMetricsError(true));
+  }, [reloadToken]);
+
+  useEffect(() => {
     auraScale.value = withRepeat(
       withSequence(
         withTiming(1.08, { duration: 2600, easing: Easing.inOut(Easing.ease) }),
@@ -88,6 +101,19 @@ export default function OutdoorsDashboard({
   const screenStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: exitX.value }],
   }));
+  const metricsRevealStyle = useAnimatedStyle(() => ({
+    opacity: metricsReveal.value,
+    transform: [
+      { translateY: interpolate(metricsReveal.value, [0, 1], [14, 0]) },
+    ],
+  }));
+
+  const retryMetrics = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(
+      () => undefined,
+    );
+    setReloadToken((value) => value + 1);
+  };
 
   return (
     <Animated.View
@@ -123,7 +149,7 @@ export default function OutdoorsDashboard({
           Connecting with yourself and the environment around you through the
           practice of ecotherapy and somatic movement.
         </Text>
-        <View style={styles.metrics}>
+        <Animated.View style={[styles.metrics, metricsRevealStyle]}>
           <Metric
             value={`${metrics.speciesScanned}`}
             label="species scanned in nature"
@@ -140,29 +166,31 @@ export default function OutdoorsDashboard({
             value={`${metrics.activeLearningDays}`}
             label="active learning days this week"
           />
-        </View>
+        </Animated.View>
         {metricsError && (
-          <Text style={styles.metricsError}>
-            Ledger unavailable. Your feature activity will retry next time.
-          </Text>
+          <Pressable onPress={retryMetrics} hitSlop={12}>
+            <Text style={styles.metricsError}>
+              Ledger unavailable. Tap to retry.
+            </Text>
+          </Pressable>
         )}
         <View style={styles.gateways}>
           <Gateway
             title="Bio Radar AI."
             label="visual & acoustic species scanner"
-            description="Point your camera or microphone at plants or animals to generate a stark, Swiss-designed breakdown card detailing what it is and its ecological significance."
+            description="Point your camera or microphone at plants or animals to generate a designed breakdown card detailing what it is and its ecological significance."
             onLaunch={onBioRadar}
           />
           <Gateway
             title="Curiosity Quizzes."
             label="adaptive knowledge retention"
-            description="AI-generated daily questions based directly on your Bio Radar scan history, turning your real-world discoveries into long-term environmental knowledge."
+            description="Generated daily questions based directly on your Bio Radar scan history, turning your real-world discoveries into long-term environmental knowledge."
             onLaunch={onCuriosity}
           />
           <Gateway
             title="Spot Finder."
             label="trails, waters & sanctuaries"
-            description="Discover nearby hiking trails, fishing spots, and natural parks. Activate location-bound challenges when arriving at a spot to earn physical restoration badges and rewards."
+            description="Discover nearby hiking trails, fishing spots and natural parks. Activate location-bound challenges when arriving at a spot to earn physical restoration badges and rewards."
             onLaunch={onSpotFinder}
           />
           <Gateway

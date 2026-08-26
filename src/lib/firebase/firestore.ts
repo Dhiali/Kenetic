@@ -624,6 +624,57 @@ export async function getOutdoorDashboardMetrics(uid: string) {
   };
 }
 
+export type QuizQueueItem = {
+  scanId: string;
+  title: string;
+  scientificName?: string;
+  capturedAssetUri?: string;
+};
+
+export async function getQuizQueue(
+  uid: string,
+  maxItems = 5,
+): Promise<QuizQueueItem[]> {
+  const [scansSnapshot, quizzesSnapshot] = await Promise.all([
+    getDocs(scanHistoryCollection(uid)),
+    getDocs(quizHistoryCollection(uid)),
+  ]);
+
+  const answeredQuestionIds = new Set(
+    quizzesSnapshot.docs.map((entry) => entry.data().questionId),
+  );
+
+  // Freshly-written scans carry an unresolved serverTimestamp (null) until
+  // the server acks it, so they must sort first to appear in the queue instantly.
+  const millisOf = (data: ScanHistoryRecord) => {
+    const timestamp = data.capturedAt as { toMillis?: () => number };
+    return typeof timestamp?.toMillis === "function"
+      ? timestamp.toMillis()
+      : Number.POSITIVE_INFINITY;
+  };
+  const scans = scansSnapshot.docs
+    .map((scan) => ({ id: scan.id, data: scan.data() }))
+    .sort((a, b) => millisOf(b.data) - millisOf(a.data));
+
+  const seenTitles = new Set<string>();
+  const queue: QuizQueueItem[] = [];
+  for (const scan of scans) {
+    const data = scan.data;
+    if (!data.includeInDailyQuizzes) continue;
+    if (seenTitles.has(data.title)) continue;
+    if (answeredQuestionIds.has(`scan-${scan.id}`)) continue;
+    seenTitles.add(data.title);
+    queue.push({
+      scanId: scan.id,
+      title: data.title,
+      scientificName: data.scientificName,
+      capturedAssetUri: data.capturedAssetUri,
+    });
+    if (queue.length >= maxItems) break;
+  }
+  return queue;
+}
+
 export function userSubcollection<T extends DocumentData>(
   uid: string,
   name: string,
