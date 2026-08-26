@@ -1,13 +1,13 @@
 import {
-  getNotificationPreference,
-  loadFocusDashboardMetrics,
-  persistDashboardSelection,
-  persistFocusFeatureLaunch,
-  persistNotificationPreference,
-  persistOnboardingCompletion,
-  registerUserAccount,
-  restoreSignedInAccount,
-  syncNotificationDevice,
+    getNotificationPreference,
+    loadFocusDashboardMetrics,
+    persistDashboardSelection,
+    persistFocusFeatureLaunch,
+    persistNotificationPreference,
+    persistOnboardingCompletion,
+    registerUserAccount,
+    restoreSignedInAccount,
+    syncNotificationDevice,
 } from "@/lib/firebase/bootstrap";
 import AlienModeScreen from "@/screens/AlienModeScreen";
 import BreatheDashboard from "@/screens/BreatheDashboard";
@@ -26,33 +26,33 @@ import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import { useEffect, useRef, useState } from "react";
 import {
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  SafeAreaView,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
+    KeyboardAvoidingView,
+    Platform,
+    Pressable,
+    SafeAreaView,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    View,
 } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import type { SharedValue } from "react-native-reanimated";
 import Animated, {
-  Easing,
-  FadeIn,
-  FadeOut,
-  interpolate,
-  runOnJS,
-  SlideInDown,
-  SlideOutDown,
-  useAnimatedStyle,
-  useSharedValue,
-  withDelay,
-  withRepeat,
-  withSequence,
-  withSpring,
-  withTiming,
+    Easing,
+    FadeIn,
+    FadeOut,
+    interpolate,
+    runOnJS,
+    SlideInDown,
+    SlideOutDown,
+    useAnimatedStyle,
+    useSharedValue,
+    withDelay,
+    withRepeat,
+    withSequence,
+    withSpring,
+    withTiming,
 } from "react-native-reanimated";
 
 type Screen =
@@ -95,26 +95,30 @@ const triggerNotification = (type: Haptics.NotificationFeedbackType) => {
 export default function Index() {
   const [screen, setScreen] = useState<Screen>("SPLASH");
   const [name, setName] = useState("Jane Doe");
-  const [showNotificationPrompt, setShowNotificationPrompt] = useState(true);
+  const [showNotificationPrompt, setShowNotificationPrompt] = useState(false);
   const restoredAccount = useRef(false);
   const go = (next: Screen) => {
     Haptics.selectionAsync().catch(() => undefined);
     setScreen(next);
   };
   useEffect(() => {
+    let mounted = true;
     const timer = setTimeout(() => {
-      if (!restoredAccount.current) setScreen("FORK");
+      if (mounted && !restoredAccount.current) setScreen("FORK");
     }, 4000);
     void restoreSignedInAccount()
       .then((user) => {
-        if (user) {
-          restoredAccount.current = true;
-          clearTimeout(timer);
-          setScreen("DASHBOARD");
-        }
+        if (!mounted || !user) return;
+        restoredAccount.current = true;
+        clearTimeout(timer);
+        setShowNotificationPrompt(false);
+        setScreen("DASHBOARD");
       })
       .catch(() => undefined);
-    return () => clearTimeout(timer);
+    return () => {
+      mounted = false;
+      clearTimeout(timer);
+    };
   }, []);
   if (screen === "SPLASH") return <Splash />;
   if (screen === "FORK")
@@ -161,7 +165,7 @@ export default function Index() {
     return (
       <ProfileScreen
         onBack={() => go("DASHBOARD")}
-        onLogout={() => go("LOGIN")}
+        onLogout={() => go("FORK")}
       />
     );
   if (screen === "FOCUS")
@@ -567,7 +571,7 @@ function Dashboard({
         if (preference === "sure") void syncNotificationDevice();
       })
       .catch(() => {
-        if (mounted) setShowBoundary(true);
+        if (mounted) setShowBoundary(showNotificationPrompt);
       });
     return () => {
       mounted = false;

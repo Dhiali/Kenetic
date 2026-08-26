@@ -33,6 +33,7 @@ import {
     persistProfileEmail,
     persistProfileName,
     persistProfilePhotoUrl,
+    reauthenticateAccount,
     signOutCurrentAccount,
 } from "../lib/firebase/bootstrap";
 import { firebaseErrorMessage } from "../lib/firebase/errors";
@@ -81,6 +82,8 @@ export default function ProfileScreen({
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [showPhotoOptions, setShowPhotoOptions] = useState(false);
+  const [showDeleteReauth, setShowDeleteReauth] = useState(false);
+  const [deletePassword, setDeletePassword] = useState("");
   const blobProgress = useSharedValue(0);
 
   useEffect(() => {
@@ -163,13 +166,14 @@ export default function ProfileScreen({
   const logout = async () => {
     setSaving(true);
     setMessage(null);
+    onLogout();
     try {
       await signOutCurrentAccount();
-      onLogout();
     } catch (error) {
-      setMessage(firebaseErrorMessage(error));
-      setSaving(false);
-      logoutX.value = withSpring(0, { damping: 15, stiffness: 200 });
+      console.warn(
+        "Logout could not be finalized:",
+        firebaseErrorMessage(error),
+      );
     }
   };
 
@@ -245,23 +249,64 @@ export default function ProfileScreen({
           text: "delete permanently",
           style: "destructive",
           onPress: () => {
-            void (async () => {
-              setSaving(true);
-              try {
-                await deleteCurrentAccount();
-                onLogout();
-              } catch (error) {
-                setMessage(firebaseErrorMessage(error));
-                setSaving(false);
-              }
-            })();
+            setMessage(null);
+            setShowDeleteReauth(true);
           },
         },
       ],
     );
 
+  const deleteAccount = async () => {
+    setSaving(true);
+    setMessage(null);
+    try {
+      await reauthenticateAccount(deletePassword);
+      await deleteCurrentAccount();
+      onLogout();
+    } catch (error) {
+      setMessage(firebaseErrorMessage(error));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <Animated.View entering={FadeIn.duration(460)} style={styles.container}>
+      {showDeleteReauth && (
+        <View style={styles.deleteReauthOverlay}>
+          <View style={styles.deleteReauthPanel}>
+            <Text style={styles.deleteReauthTitle}>confirm deletion.</Text>
+            <Text style={styles.deleteReauthText}>
+              Enter your current password to securely delete this account.
+            </Text>
+            <TextInput
+              value={deletePassword}
+              onChangeText={setDeletePassword}
+              secureTextEntry
+              autoCapitalize="none"
+              placeholder="current password"
+              placeholderTextColor={colors.white50}
+              style={styles.deletePasswordInput}
+            />
+            <View style={styles.deleteReauthActions}>
+              <Pressable
+                onPress={() => {
+                  setDeletePassword("");
+                  setShowDeleteReauth(false);
+                }}
+                disabled={saving}
+              >
+                <Text style={styles.cancelText}>cancel.</Text>
+              </Pressable>
+              <Pressable onPress={() => void deleteAccount()} disabled={saving}>
+                <Text style={styles.deleteText}>
+                  {saving ? "deleting..." : "delete permanently"}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      )}
       <ScrollView
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
@@ -679,6 +724,42 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     textTransform: "uppercase",
     letterSpacing: 1,
+  },
+  deleteReauthOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 20,
+    backgroundColor: "rgba(0,0,0,0.72)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 24,
+  },
+  deleteReauthPanel: {
+    width: "100%",
+    maxWidth: 420,
+    backgroundColor: colors.black,
+    borderWidth: 1,
+    borderColor: colors.white20,
+    padding: 22,
+  },
+  deleteReauthTitle: { color: colors.white, fontSize: 24, fontWeight: "800" },
+  deleteReauthText: {
+    color: colors.white50,
+    fontSize: 14,
+    lineHeight: 21,
+    marginTop: 10,
+  },
+  deletePasswordInput: {
+    color: colors.white,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.white20,
+    paddingVertical: 12,
+    marginTop: 18,
+  },
+  deleteReauthActions: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginTop: 24,
   },
   deleteButton: { marginTop: 52, paddingVertical: 12 },
   deleteText: {

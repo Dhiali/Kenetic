@@ -1,12 +1,12 @@
 import { StatusBar } from "expo-status-bar";
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import {
-  persistOnboardingCompletion,
-  registerUserAccount,
-  restoreSignedInAccount,
+    persistOnboardingCompletion,
+    registerUserAccount,
+    restoreSignedInAccount,
 } from "./src/lib/firebase/bootstrap";
 import AlienModeScreen from "./src/screens/AlienModeScreen";
 import BreatheDashboard from "./src/screens/BreatheDashboard";
@@ -44,18 +44,23 @@ function ComingSoon({ label, onBack }: { label: string; onBack: () => void }) {
 
 export default function App() {
   const [currentScreen, setCurrentScreen] = useState<ScreenState>("SPLASH");
-  const [showNotificationPrompt, setShowNotificationPrompt] = useState(true);
-  const restoredAccount = React.useRef(false);
+  const [showNotificationPrompt, setShowNotificationPrompt] = useState(false);
+  const restoredAccount = useRef(false);
 
   React.useEffect(() => {
+    const timer = setTimeout(() => {
+      if (!restoredAccount.current) setCurrentScreen("FORK");
+    }, 4000);
     void restoreSignedInAccount()
       .then((user) => {
-        if (user) {
-          restoredAccount.current = true;
-          setCurrentScreen("DASHBOARD");
-        }
+        if (!user) return;
+        restoredAccount.current = true;
+        clearTimeout(timer);
+        setShowNotificationPrompt(false);
+        setCurrentScreen("DASHBOARD");
       })
       .catch(() => undefined);
+    return () => clearTimeout(timer);
   }, []);
 
   const goTo = (s: ScreenState) => setCurrentScreen(s);
@@ -124,7 +129,7 @@ export default function App() {
         return (
           <ProfileScreen
             onBack={() => goTo("DASHBOARD")}
-            onLogout={() => goTo("LOGIN")}
+            onLogout={() => goTo("FORK")}
           />
         );
       // ---- Coming in phase 2/3 ----

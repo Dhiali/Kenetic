@@ -4,25 +4,25 @@ import React, { useEffect, useState } from "react";
 import { Dimensions, Platform, StyleSheet, Text, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
-  Easing,
-  FadeIn,
-  interpolate,
-  interpolateColor,
-  runOnJS,
-  SlideInDown,
-  SlideOutDown,
-  useAnimatedStyle,
-  useSharedValue,
-  withRepeat,
-  withSequence,
-  withSpring,
-  withTiming,
+    Easing,
+    FadeIn,
+    interpolate,
+    interpolateColor,
+    runOnJS,
+    SlideInDown,
+    SlideOutDown,
+    useAnimatedStyle,
+    useSharedValue,
+    withRepeat,
+    withSequence,
+    withSpring,
+    withTiming,
 } from "react-native-reanimated";
 import {
-  getNotificationPreference,
-  persistDashboardSelection,
-  persistNotificationPreference,
-  syncNotificationDevice,
+    getNotificationPreference,
+    persistDashboardSelection,
+    persistNotificationPreference,
+    syncNotificationDevice,
 } from "../lib/firebase/bootstrap";
 
 const { width, height } = Dimensions.get("window");
@@ -56,7 +56,7 @@ export default function DashboardScreen({
         if (preference === "sure") void syncNotificationDevice();
       })
       .catch(() => {
-        if (mounted) setShowBoundary(true);
+        if (mounted) setShowBoundary(showNotificationPrompt);
       });
     return () => {
       mounted = false;

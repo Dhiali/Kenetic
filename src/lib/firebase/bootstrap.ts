@@ -5,6 +5,7 @@ import {
     ensureAnonymousUser,
     getCurrentUser,
     googleCredential,
+    reauthenticateCurrentUser,
     signInWithEmailPassword,
     signInWithProviderCredential,
     signInWithProviderCredentialDirect,
@@ -168,8 +169,16 @@ export async function deleteCurrentAccount() {
   const user = getCurrentUser();
   if (!user) throw new Error("No signed-in account was found.");
 
-  await deleteUserData(user.uid);
+  const cleanupCompleted = await deleteUserData(user.uid);
   await deleteCurrentUser();
+  return { cleanupCompleted };
+}
+
+export async function reauthenticateAccount(currentPassword: string) {
+  if (!currentPassword.trim()) {
+    throw new Error("Enter your current password to delete your account.");
+  }
+  await reauthenticateCurrentUser(currentPassword);
 }
 
 export async function signOutCurrentAccount() {

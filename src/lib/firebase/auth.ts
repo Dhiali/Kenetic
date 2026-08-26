@@ -113,6 +113,16 @@ export async function updateCurrentUserEmail(
   await updateEmail(user, email);
 }
 
+export async function reauthenticateCurrentUser(currentPassword: string) {
+  const user = auth.currentUser;
+  if (!user) throw new Error("Cannot re-authenticate before signing in.");
+  if (!user.email) {
+    throw new Error("Sign in again with your account provider to continue.");
+  }
+  const credential = EmailAuthProvider.credential(user.email, currentPassword);
+  await reauthenticateWithCredential(user, credential);
+}
+
 export function observeAuthState(
   listener: (user: User | null) => void,
 ): () => void {

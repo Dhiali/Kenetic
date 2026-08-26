@@ -501,7 +501,7 @@ export function removeDevice(uid: string, deviceId: string) {
   return deleteDoc(doc(devicesCollection(uid), deviceId));
 }
 
-export async function deleteUserData(uid: string) {
+export async function deleteUserData(uid: string): Promise<boolean> {
   const subcollections = [
     "sessions",
     "metrics",
@@ -516,12 +516,25 @@ export async function deleteUserData(uid: string) {
     "quizHistory",
   ];
 
-  for (const name of subcollections) {
-    const snapshot = await getDocs(userCollection(uid, name));
-    await Promise.all(snapshot.docs.map((item) => deleteDoc(item.ref)));
+  const results = await Promise.all(
+    subcollections.map(async (name) => {
+      try {
+        const snapshot = await getDocs(userCollection(uid, name));
+        await Promise.all(snapshot.docs.map((item) => deleteDoc(item.ref)));
+        return true;
+      } catch {
+        return false;
+      }
+    }),
+  );
+
+  try {
+    await deleteDoc(userReference(uid));
+  } catch {
+    return false;
   }
 
-  await deleteDoc(userReference(uid));
+  return results.every(Boolean);
 }
 
 export function createScanHistory(
