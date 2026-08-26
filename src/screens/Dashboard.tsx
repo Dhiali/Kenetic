@@ -1,6 +1,5 @@
 import { BlurView } from "expo-blur";
 import * as Haptics from "expo-haptics";
-import * as Notifications from "expo-notifications";
 import React, { useEffect, useState } from "react";
 import { Dimensions, Platform, StyleSheet, Text, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
@@ -19,6 +18,12 @@ import Animated, {
   withSpring,
   withTiming,
 } from "react-native-reanimated";
+import {
+  getNotificationPreference,
+  persistDashboardSelection,
+  persistNotificationPreference,
+  syncNotificationDevice,
+} from "../lib/firebase/bootstrap";
 
 const { width, height } = Dimensions.get("window");
 
@@ -36,8 +41,25 @@ export default function DashboardScreen({
   // --------------------------------------------------------
   // Boundary Prompt State
   // --------------------------------------------------------
-  const [showBoundary, setShowBoundary] = useState(true);
+  const [showBoundary, setShowBoundary] = useState(false);
+  const [savingPreference, setSavingPreference] = useState(false);
   const boundaryOpacity = useSharedValue(1);
+
+  useEffect(() => {
+    let mounted = true;
+    void getNotificationPreference()
+      .then((preference) => {
+        if (!mounted) return;
+        setShowBoundary(preference === undefined);
+        if (preference === "sure") void syncNotificationDevice();
+      })
+      .catch(() => {
+        if (mounted) setShowBoundary(true);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   // --------------------------------------------------------
   // Dashboard State (Magnetic Aura & Draggables)
@@ -47,6 +69,7 @@ export default function DashboardScreen({
     label: string;
     color: string;
   } | null>(null);
+  const [selectionError, setSelectionError] = useState<string | null>(null);
   const [draggingItem, setDraggingItem] = useState<string | null>(null);
   const auraScale = useSharedValue(1);
   const auraOpacity = useSharedValue(0.62);
@@ -108,23 +131,39 @@ export default function DashboardScreen({
   };
 
   const handleNotificationChoice = async (choice: "later" | "sure") => {
-    if (choice === "sure") {
-      await Notifications.requestPermissionsAsync().catch(() => undefined);
+    if (savingPreference) return;
+    setSavingPreference(true);
+    try {
+      await persistNotificationPreference(choice);
+      dismissBoundary();
+    } catch {
+      setSavingPreference(false);
     }
-    dismissBoundary();
   };
 
-  const handleDropSuccess = (id: string, label: string, color: string) => {
+  const handleDropSuccess = async (
+    id: string,
+    label: string,
+    color: string,
+  ) => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
       () => undefined,
     );
+    setSelectionError(null);
     setSelectedItem({ id, label, color });
     wipeScale.value = withTiming(40, { duration: 1000 });
-    setTimeout(() => {
-      if (id === "focus") onFocus();
-      if (id === "outdoors") onOutdoors();
-      if (id === "breathe") onBreathe();
-    }, 1000);
+    try {
+      await persistDashboardSelection(id as "focus" | "outdoors" | "breathe");
+      setTimeout(() => {
+        if (id === "focus") onFocus();
+        if (id === "outdoors") onOutdoors();
+        if (id === "breathe") onBreathe();
+      }, 1000);
+    } catch {
+      setSelectedItem(null);
+      setSelectionError("Could not save your state. Try again.");
+      wipeScale.value = withTiming(0, { duration: 260 });
+    }
   };
 
   // --------------------------------------------------------
@@ -243,7 +282,7 @@ export default function DashboardScreen({
         event.translationX > 0 ? event.translationX * 0.1 : event.translationX;
     })
     .onEnd((event) => {
-      if (event.translationX < -60) {
+      if (event.translationX > 60) {
         runOnJS(triggerImpact)(Haptics.ImpactFeedbackStyle.Medium);
         runOnJS(onProfile)();
       } else {
@@ -277,9 +316,12 @@ export default function DashboardScreen({
       <View style={styles.dashboardContent} pointerEvents="box-none">
         <View style={styles.headerBlock}>
           <Text style={styles.headlineText}>
-            Drag your desired{"\n"}state into the{"\n"}aura to enter.
+            Drag your desired{"\n"}state into the{"\n"}aura above.
           </Text>
         </View>
+        {selectionError && (
+          <Text style={styles.selectionError}>{selectionError}</Text>
+        )}
 
         <View style={styles.menuContainer} pointerEvents="box-none">
           <DraggableMenuItem
@@ -305,7 +347,7 @@ export default function DashboardScreen({
         {/* Profile Anchor (Bottom Left) */}
         <GestureDetector gesture={profileGesture}>
           <Animated.Text style={[styles.profileText, profileStyle]}>
-            &larr; your profile.
+            your profile. &rarr;
           </Animated.Text>
         </GestureDetector>
       </View>
@@ -330,7 +372,7 @@ export default function DashboardScreen({
 
           {/* The Slide-Up Card */}
           <Animated.View
-            entering={SlideInDown.duration(600).springify().damping(18)}
+            entering={SlideInDown.duration(520)}
             exiting={SlideOutDown.duration(400)}
             style={styles.boundaryCard}
           >
@@ -464,6 +506,12 @@ const styles = StyleSheet.create({
     marginBottom: 40,
     transform: [{ translateY: 170 }],
   },
+  selectionError: {
+    color: "#fca5a5",
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 12,
+  },
   headlineText: {
     fontSize: 35,
     lineHeight: 40,
@@ -522,7 +570,7 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 72,
     borderTopRightRadius: 32,
     padding: 32,
-    paddingTop: 18,
+    paddingTop: 58,
     paddingBottom: 64,
     borderTopWidth: 1,
     borderTopColor: "rgba(255, 255, 255, 0.1)",

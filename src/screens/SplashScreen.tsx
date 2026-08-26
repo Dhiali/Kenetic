@@ -1,6 +1,6 @@
 import { BlurView } from "expo-blur";
 import React, { useEffect } from "react";
-import { StyleSheet } from "react-native";
+import { StyleSheet, View } from "react-native";
 import Animated, {
   Easing,
   interpolate,
@@ -19,6 +19,7 @@ export default function SplashScreen({
   const containerOpacity = useSharedValue(0);
   const textOpacity = useSharedValue(0);
   const textTranslateY = useSharedValue(10);
+  const taglineOpacity = useSharedValue(0);
   const blobProgress = useSharedValue(0);
 
   useEffect(() => {
@@ -29,6 +30,7 @@ export default function SplashScreen({
 
     textOpacity.value = withDelay(500, withTiming(1, { duration: 1000 }));
     textTranslateY.value = withDelay(500, withTiming(0, { duration: 1000 }));
+    taglineOpacity.value = withDelay(3000, withTiming(1, { duration: 900 }));
 
     // Animate through the 3 phases of the blob over 4 seconds
     blobProgress.value = withTiming(1, {
@@ -96,6 +98,10 @@ export default function SplashScreen({
     transform: [{ translateY: textTranslateY.value }],
   }));
 
+  const taglineAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: taglineOpacity.value,
+  }));
+
   return (
     <Animated.View style={[styles.container, containerAnimatedStyle]}>
       {/* 1. The Raw Morphing Shape */}
@@ -106,9 +112,14 @@ export default function SplashScreen({
       <BlurView intensity={120} tint="dark" style={StyleSheet.absoluteFill} />
 
       {/* 3. The Typography: Crisp and layered on top of the smoke */}
-      <Animated.Text style={[styles.text, textAnimatedStyle]}>
-        kenetic.
-      </Animated.Text>
+      <View style={styles.logoGroup}>
+        <Animated.Text style={[styles.text, textAnimatedStyle]}>
+          Kenetic.
+        </Animated.Text>
+        <Animated.Text style={[styles.tagline, taglineAnimatedStyle]}>
+          we inspire movement.
+        </Animated.Text>
+      </View>
     </Animated.View>
   );
 }
@@ -134,5 +145,16 @@ const styles = StyleSheet.create({
     letterSpacing: -2,
     color: "#ffffff",
     zIndex: 10,
+  },
+  logoGroup: {
+    alignItems: "center",
+    zIndex: 10,
+  },
+  tagline: {
+    marginTop: 8,
+    fontSize: 13,
+    fontWeight: "600",
+    letterSpacing: 1.5,
+    color: "rgba(255, 255, 255, 0.72)",
   },
 });

@@ -7,16 +7,27 @@
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "firebase:emulators": "firebase emulators:start",
+    "firebase:seed": "npm --prefix functions run seed",
+    "firebase:deploy:rules": "firebase deploy --only firestore:rules",
+    "firebase:deploy:storage": "firebase deploy --only storage",
+    "firebase:deploy:functions": "firebase deploy --only functions"
   },
   "dependencies": {
+    "@react-native-async-storage/async-storage": "2.2.0",
     "expo": "^54.0.37",
+    "expo-apple-authentication": "~8.0.8",
+    "expo-auth-session": "~7.0.11",
     "expo-blur": "~15.0.8",
     "expo-camera": "~17.0.10",
+    "expo-crypto": "~15.0.9",
     "expo-haptics": "~15.0.8",
     "expo-linear-gradient": "~15.0.8",
+    "expo-location": "~19.0.8",
     "expo-notifications": "~0.32.17",
     "expo-status-bar": "~3.0.9",
+    "firebase": "^12.18.0",
     "lucide-react-native": "^0.454.0",
     "react": "19.1.0",
     "react-native": "0.81.5",
@@ -30,6 +41,7 @@
     "@babel/core": "^7.25.0",
     "@types/react": "~19.1.10",
     "babel-preset-expo": "~54.0.10",
+    "firebase-tools": "^14.16.0",
     "typescript": "^5.3.3"
   }
 }

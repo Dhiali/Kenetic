@@ -1,5 +1,4 @@
 import { BlurView } from "expo-blur";
-import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import React, { useEffect } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
@@ -19,19 +18,22 @@ import Animated, {
 
 type Props = {
   onBack: () => void;
-  onGetShitDone?: () => void;
-  onAlienMode?: () => void;
+  onCalm?: () => void;
+  onRecenter?: () => void;
+  onClearMind?: () => void;
+  onDeepRelax?: () => void;
 };
 
-export default function FocusDashboard({
+export default function BreatheDashboard({
   onBack,
-  onGetShitDone = () => undefined,
-  onAlienMode = () => undefined,
+  onCalm = () => undefined,
+  onRecenter = () => undefined,
+  onClearMind = () => undefined,
+  onDeepRelax = () => undefined,
 }: Props) {
   const auraScale = useSharedValue(1);
   const auraMorph = useSharedValue(0);
   const exitX = useSharedValue(0);
-
   useEffect(() => {
     auraScale.value = withRepeat(
       withSequence(
@@ -50,20 +52,15 @@ export default function FocusDashboard({
       true,
     );
   }, []);
-
   const exitGesture = Gesture.Pan()
     .activeOffsetX(10)
     .onUpdate((event) => {
       if (event.translationX > 0) exitX.value = event.translationX;
     })
     .onEnd((event) => {
-      if (event.translationX > 80) {
-        runOnJS(onBack)();
-      } else {
-        exitX.value = withSpring(0, { damping: 15, stiffness: 200 });
-      }
+      if (event.translationX > 80) runOnJS(onBack)();
+      else exitX.value = withSpring(0, { damping: 15, stiffness: 200 });
     });
-
   const auraStyle = useAnimatedStyle(() => ({
     transform: [
       { scale: auraScale.value },
@@ -76,7 +73,6 @@ export default function FocusDashboard({
   const screenStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: exitX.value }],
   }));
-
   return (
     <Animated.View
       style={[styles.screen, screenStyle]}
@@ -84,7 +80,7 @@ export default function FocusDashboard({
     >
       <Animated.View style={[styles.aura, auraStyle]}>
         <LinearGradient
-          colors={["#b3133b", "#e11d48", "rgba(225,29,72,0)"]}
+          colors={["#9a3412", "#f97316", "rgba(249,115,22,0)"]}
           locations={[0, 0.48, 1]}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
@@ -103,36 +99,53 @@ export default function FocusDashboard({
         <GestureDetector gesture={exitGesture}>
           <View style={styles.nav}>
             <Text style={styles.back}>← dashboard </Text>
-            <Text style={styles.hint}>(drag right to exit focus state)</Text>
+            <Text style={styles.hint}>(drag right to exit breathe state)</Text>
           </View>
         </GestureDetector>
-        <Text style={styles.title}>focus state.</Text>
+        <Text style={styles.title}>breathe state.</Text>
+        <Text style={styles.manifesto}>
+          use breath to settle your body, clear your attention, and return to
+          the present moment.
+        </Text>
         <View style={styles.metrics}>
-          <Metric value="3.5h" label="deep session total today" />
-          <Metric value="88%" label="off-screen tether score" />
-          <Metric value="12" label="tasks deconstructed" />
+          <Metric value="14" label="sessions completed this week" />
+          <Metric value="42m" label="total somatic restoration" />
+          <Metric value="94%" label="calm index / nervous system recovery" />
         </View>
         <View style={styles.gateways}>
           <Gateway
-            title="get shit done."
-            label="sound tether & app lock"
-            description="Connects Apple Music or Spotify. Activates background audio and automatically pauses playback if you stay actively on your phone for more than 2 minutes."
-            onLaunch={onGetShitDone}
+            accent="#f97316"
+            title="calm down."
+            label="physiological sigh (two quick inhales, long slow exhale)"
+            description="Acute anxiety, racing heart rate, physical tension."
+            onLaunch={onCalm}
           />
           <Gateway
-            title="alien mode."
-            label="ai task deconstructor"
-            description={
-              'Intercepts overwhelming tasks and prompts you with a "Beginner\'s Mind" question to reframe your perspective before the timer begins.'
-            }
-            onLaunch={onAlienMode}
+            accent="#e11d48"
+            title="recenter."
+            label="4-7-8 rhythmic grounding"
+            description="Midday distraction, emotional turbulence, task switching."
+            onLaunch={onRecenter}
+          />
+          <Gateway
+            accent="#16a34a"
+            title="clear mind."
+            label="4-4-4-4 box breathing"
+            description="Brain fog, mental overload, pre-focus preparation."
+            onLaunch={onClearMind}
+          />
+          <Gateway
+            accent="#d6c3a5"
+            title="deep relax."
+            label="non-sleep deep rest (NSDR) / somatic body scan"
+            description="Sleep preparation, post-work shutdown, severe fatigue."
+            onLaunch={onDeepRelax}
           />
         </View>
       </ScrollView>
     </Animated.View>
   );
 }
-
 function Metric({ value, label }: { value: string; label: string }) {
   return (
     <View style={styles.metric}>
@@ -141,63 +154,68 @@ function Metric({ value, label }: { value: string; label: string }) {
     </View>
   );
 }
-
 function Gateway({
   title,
   label,
   description,
+  accent,
   onLaunch,
 }: {
   title: string;
   label: string;
   description: string;
+  accent: string;
   onLaunch: () => void;
 }) {
+  const x = useSharedValue(0);
   const y = useSharedValue(0);
   const active = useSharedValue(false);
   const gesture = Gesture.Pan()
     .onStart(() => {
       active.value = true;
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(
-        () => undefined,
-      );
     })
     .onUpdate((event) => {
+      x.value = Math.min(0, event.translationX);
       y.value = Math.min(0, event.translationY);
     })
     .onEnd((event) => {
       active.value = false;
-      if (event.translationX < -80) {
-        runOnJS(onLaunch)();
-      }
+      if (event.translationX < -80) runOnJS(onLaunch)();
+      x.value = withSpring(0, { damping: 16, stiffness: 180 });
       y.value = withSpring(0, { damping: 16, stiffness: 180 });
     });
   const style = useAnimatedStyle(() => ({
-    transform: [{ translateY: y.value }, { scale: active.value ? 1.03 : 1 }],
+    transform: [
+      { translateX: x.value },
+      { translateY: y.value },
+      { scale: active.value ? 1.03 : 1 },
+    ],
+    opacity: active.value ? 0.88 : 1,
   }));
   return (
     <GestureDetector gesture={gesture}>
       <Animated.View style={[styles.gateway, style]}>
         <Text style={styles.gatewayTitle}>{title}</Text>
-        <Text style={styles.gatewayLabel}>{label}</Text>
+        <Text style={[styles.gatewayLabel, { color: accent }]}>{label}</Text>
         <Text style={styles.gatewayDescription}>{description}</Text>
-        <Text style={styles.gatewayHint}>← swipe to open</Text>
+        <Text style={[styles.gatewayHint, { color: accent }]}>
+          ← swipe to open
+        </Text>
       </Animated.View>
     </GestureDetector>
   );
 }
-
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: "#0a0a0a", overflow: "hidden" },
   aura: {
     position: "absolute",
     top: -150,
-    left: -90,
+    right: -80,
     width: 430,
     height: 420,
     borderRadius: 220,
     overflow: "hidden",
-    shadowColor: "#e11d48",
+    shadowColor: "#f97316",
     shadowOpacity: 0.55,
     shadowRadius: 60,
     shadowOffset: { width: 0, height: 14 },
@@ -211,7 +229,7 @@ const styles = StyleSheet.create({
     marginTop: 60,
     marginBottom: 24,
   },
-  back: { color: "#e11d48", fontSize: 15, fontWeight: "700" },
+  back: { color: "#f97316", fontSize: 15, fontWeight: "700" },
   hint: { color: "rgba(255,255,255,0.35)", fontSize: 13, fontWeight: "500" },
   title: {
     color: "#fff",
@@ -219,7 +237,13 @@ const styles = StyleSheet.create({
     lineHeight: 54,
     fontWeight: "900",
     letterSpacing: -2,
-    marginBottom: 36,
+    marginBottom: 16,
+  },
+  manifesto: {
+    color: "rgba(255,255,255,0.62)",
+    fontSize: 15,
+    lineHeight: 23,
+    marginBottom: 32,
   },
   metrics: { gap: 18, marginBottom: 64 },
   metric: { flexDirection: "row", alignItems: "baseline", gap: 14 },
@@ -248,7 +272,7 @@ const styles = StyleSheet.create({
     letterSpacing: -1.5,
   },
   gatewayLabel: {
-    color: "#e11d48",
+    color: "#f97316",
     fontSize: 12,
     fontWeight: "800",
     letterSpacing: 1.4,
@@ -262,7 +286,7 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   gatewayHint: {
-    color: "#e11d48",
+    color: "#f97316",
     fontSize: 12,
     fontWeight: "800",
     letterSpacing: 1.2,

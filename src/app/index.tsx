@@ -1,10 +1,25 @@
+import {
+  bootstrapAnonymousUser,
+  getNotificationPreference,
+  persistDashboardSelection,
+  persistNotificationPreference,
+  persistOnboardingCompletion,
+  registerUserAccount,
+  syncNotificationDevice,
+} from "@/lib/firebase/bootstrap";
+import BreatheDashboard from "@/screens/BreatheDashboard";
 import DashboardScreen from "@/screens/Dashboard";
+import IntakeCarousel from "@/screens/IntakeCarousel";
 import OnboardingScreen from "@/screens/OnboardingScreen";
+import OutdoorsDashboard from "@/screens/OutdoorsDashboard";
+import ProfileScreen from "@/screens/ProfileScreen";
+import SignupScreen from "@/screens/SignupScreen";
 import { BlurView } from "expo-blur";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import { useEffect, useState } from "react";
 import {
+  KeyboardAvoidingView,
   Platform,
   Pressable,
   SafeAreaView,
@@ -38,13 +53,18 @@ type Screen =
   | "FORK"
   | "LOGIN"
   | "SIGNUP"
+  | "CAROUSEL"
   | "ONBOARDING"
   | "RITUAL"
   | "DASHBOARD"
   | "PROFILE"
   | "FOCUS"
+  | "GSD_SETUP"
+  | "ALIEN_MODE"
   | "BREATHE"
-  | "OUTDOORS";
+  | "BREATHE_SETUP"
+  | "OUTDOORS"
+  | "OUTDOORS_FEATURE";
 type Accent = "#e11d48" | "#f97316" | "#16a34a" | "#3b82f6";
 const colors = {
   black: "#0a0a0a",
@@ -69,6 +89,7 @@ export default function Index() {
     setScreen(next);
   };
   useEffect(() => {
+    void bootstrapAnonymousUser().catch(() => undefined);
     const timer = setTimeout(() => setScreen("FORK"), 4000);
     return () => clearTimeout(timer);
   }, []);
@@ -85,33 +106,124 @@ export default function Index() {
     );
   if (screen === "SIGNUP")
     return (
-      <Auth
-        title="begin."
-        button="create your state"
-        signup
-        onComplete={() => go("ONBOARDING")}
+      <SignupScreen
+        onComplete={() => go("CAROUSEL")}
+        onSubmit={async (values) => {
+          await registerUserAccount(values);
+          go("CAROUSEL");
+        }}
+        onBack={() => go("FORK")}
       />
     );
+
+  if (screen === "CAROUSEL")
+    return <IntakeCarousel onComplete={() => go("ONBOARDING")} />;
 
   if (screen === "ONBOARDING")
     return (
       <ScreenFrame>
-        <OnboardingScreen onComplete={() => go("DASHBOARD")} />
+        <OnboardingScreen
+          onComplete={() => {
+            void persistOnboardingCompletion().catch(() => undefined);
+            go("DASHBOARD");
+          }}
+        />
       </ScreenFrame>
     );
 
   if (screen === "PROFILE")
     return (
-      <Profile
-        name={name}
-        setName={setName}
+      <ProfileScreen
         onBack={() => go("DASHBOARD")}
         onLogout={() => go("SPLASH")}
       />
     );
-  if (screen === "FOCUS") return <Focus onBack={() => go("DASHBOARD")} />;
-  if (screen === "BREATHE") return <Breathe onBack={() => go("DASHBOARD")} />;
-  if (screen === "OUTDOORS") return <Outdoors onBack={() => go("DASHBOARD")} />;
+  if (screen === "FOCUS")
+    return (
+      <Focus
+        onBack={() => go("DASHBOARD")}
+        onGetShitDone={() => go("GSD_SETUP")}
+        onAlienMode={() => go("ALIEN_MODE")}
+      />
+    );
+  if (screen === "GSD_SETUP")
+    return (
+      <FeatureList
+        title="get shit done."
+        accent="#e11d48"
+        onBack={() => go("FOCUS")}
+        items={[
+          {
+            title: "sound tether & app lock",
+            description:
+              "Connect Apple Music or Spotify and protect your focus session.",
+          },
+        ]}
+      />
+    );
+  if (screen === "ALIEN_MODE")
+    return (
+      <FeatureList
+        title="alien mode."
+        accent="#e11d48"
+        onBack={() => go("FOCUS")}
+        items={[
+          {
+            title: "ai task deconstructor",
+            description:
+              "Turn an overwhelming task into one clear first action.",
+          },
+        ]}
+      />
+    );
+  if (screen === "BREATHE")
+    return (
+      <BreatheDashboard
+        onBack={() => go("DASHBOARD")}
+        onCalm={() => go("BREATHE_SETUP")}
+        onRecenter={() => go("BREATHE_SETUP")}
+        onClearMind={() => go("BREATHE_SETUP")}
+        onDeepRelax={() => go("BREATHE_SETUP")}
+      />
+    );
+  if (screen === "BREATHE_SETUP")
+    return (
+      <FeatureList
+        title="breathe practice."
+        accent="#f97316"
+        onBack={() => go("BREATHE")}
+        items={[
+          {
+            title: "guided breath",
+            description: "Your breathe feature will open here.",
+          },
+        ]}
+      />
+    );
+  if (screen === "OUTDOORS")
+    return (
+      <OutdoorsDashboard
+        onBack={() => go("DASHBOARD")}
+        onBioRadar={() => go("OUTDOORS_FEATURE")}
+        onCuriosity={() => go("OUTDOORS_FEATURE")}
+        onSpotFinder={() => go("OUTDOORS_FEATURE")}
+        onChallenges={() => go("OUTDOORS_FEATURE")}
+      />
+    );
+  if (screen === "OUTDOORS_FEATURE")
+    return (
+      <FeatureList
+        title="outdoors feature."
+        accent="#16a34a"
+        onBack={() => go("OUTDOORS")}
+        items={[
+          {
+            title: "field practice",
+            description: "Your outdoor feature will open here.",
+          },
+        ]}
+      />
+    );
   return (
     <DashboardScreen
       onProfile={() => go("PROFILE")}
@@ -150,6 +262,7 @@ function Splash() {
   const breath = useSharedValue(1);
   const release = useSharedValue(1);
   const opacity = useSharedValue(1);
+  const taglineOpacity = useSharedValue(0);
   const shape = useSharedValue(0);
   const fluidColor = useSharedValue("#16a34a");
   useEffect(() => {
@@ -185,6 +298,7 @@ function Splash() {
       3500,
       withTiming(0, { duration: 500, easing: Easing.out(Easing.ease) }),
     );
+    taglineOpacity.value = withDelay(3000, withTiming(1, { duration: 900 }));
   }, [breath, fluidColor, opacity, release, shape]);
   const fluidStyle = useAnimatedStyle(() => ({
     opacity: opacity.value,
@@ -211,9 +325,16 @@ function Splash() {
           fluidStyle,
         ]}
       />
-      <Animated.Text entering={FadeIn.duration(900)} style={styles.logo}>
-        kenetic.
-      </Animated.Text>
+      <View style={styles.logoGroup}>
+        <Animated.Text entering={FadeIn.duration(900)} style={styles.logo}>
+          kenetic.
+        </Animated.Text>
+        <Animated.Text
+          style={[styles.tagline, { opacity: taglineOpacity.value }]}
+        >
+          we inspire movement.
+        </Animated.Text>
+      </View>
     </View>
   );
 }
@@ -270,60 +391,111 @@ function Auth({
   button,
   signup = false,
   onComplete,
+  onBack,
 }: {
   title: string;
   button: string;
   signup?: boolean;
   onComplete: () => void;
+  onBack?: () => void;
 }) {
   const [agreed, setAgreed] = useState(!signup);
+  const backX = useSharedValue(0);
+  const backGesture = Gesture.Pan()
+    .activeOffsetX(10)
+    .onUpdate((event) => {
+      if (event.translationX > 0) backX.value = event.translationX;
+    })
+    .onEnd((event) => {
+      if (event.translationX > 70 && onBack) runOnJS(onBack)();
+      else backX.value = withSpring(0, { damping: 15, stiffness: 200 });
+    });
+  const backStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: backX.value }],
+  }));
   return (
-    <ScreenFrame light>
-      <ScrollView
-        contentContainerStyle={styles.auth}
-        keyboardShouldPersistTaps="handled"
+    <ScreenFrame light={!signup}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        style={styles.authKeyboard}
       >
-        <Text style={styles.lightTitle}>{title}</Text>
-        {signup && (
+        <ScrollView
+          contentContainerStyle={styles.auth}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <Text style={[styles.lightTitle, signup && styles.darkAuthTitle]}>
+            {title}
+          </Text>
+          {signup && (
+            <Text style={[styles.authIntro, styles.darkAuthMuted]}>
+              Find curiosity in everyday life, stay centered in the moment, and
+              move forward with renewed attention.
+            </Text>
+          )}
+          {signup && (
+            <View style={styles.inputGroup}>
+              <Input placeholder="name" dark />
+              <Input placeholder="surname" dark />
+            </View>
+          )}
           <View style={styles.inputGroup}>
-            <Input placeholder="name" />
-            <Input placeholder="surname" />
+            <Input
+              placeholder="email"
+              keyboardType="email-address"
+              dark={signup}
+            />
+            <Input placeholder="password" secureTextEntry dark={signup} />
           </View>
-        )}
-        <View style={styles.inputGroup}>
-          <Input placeholder="email" keyboardType="email-address" />
-          <Input placeholder="password" secureTextEntry />
-        </View>
-        {signup && (
+          {signup && (
+            <Pressable
+              onPress={() => setAgreed((value) => !value)}
+              style={styles.terms}
+            >
+              <View style={[styles.check, agreed && styles.checkActive]} />
+              <Text style={[styles.termsText, signup && styles.darkAuthMuted]}>
+                I agree to the boundaries of kenetic.
+              </Text>
+            </Pressable>
+          )}
+          <Text style={[styles.social, signup && styles.darkAuthMuted]}>
+            apple. google. facebook.
+          </Text>
           <Pressable
-            onPress={() => setAgreed((value) => !value)}
-            style={styles.terms}
+            disabled={!agreed}
+            onPress={onComplete}
+            style={({ pressed }) => [
+              styles.textAction,
+              !agreed && { opacity: 0.3 },
+              pressed && { opacity: 0.55 },
+            ]}
           >
-            <View style={[styles.check, agreed && styles.checkActive]} />
-            <Text style={styles.termsText}>
-              I agree to the boundaries of kenetic.
+            <Text style={[styles.actionText, signup && styles.darkAuthAction]}>
+              {button} ›
             </Text>
           </Pressable>
-        )}
-        <Text style={styles.social}>apple. google. facebook.</Text>
-        <Pressable
-          disabled={!agreed}
-          onPress={onComplete}
-          style={({ pressed }) => [
-            styles.textAction,
-            !agreed && { opacity: 0.3 },
-            pressed && { opacity: 0.55 },
-          ]}
-        >
-          <Text style={styles.actionText}>{button} ›</Text>
-        </Pressable>
-      </ScrollView>
+          {onBack && (
+            <GestureDetector gesture={backGesture}>
+              <Animated.Text style={[styles.authBackLink, backStyle]}>
+                ← where to?
+              </Animated.Text>
+            </GestureDetector>
+          )}
+        </ScrollView>
+      </KeyboardAvoidingView>
     </ScreenFrame>
   );
 }
-function Input(props: React.ComponentProps<typeof TextInput>) {
+function Input({
+  dark = false,
+  ...props
+}: React.ComponentProps<typeof TextInput> & { dark?: boolean }) {
   return (
-    <TextInput {...props} placeholderTextColor="#aaa" style={styles.input} />
+    <TextInput
+      {...props}
+      placeholderTextColor={dark ? "#999" : "#aaa"}
+      style={[styles.input, dark && styles.darkInput]}
+    />
   );
 }
 function Dashboard({
@@ -338,8 +510,26 @@ function Dashboard({
   onOutdoors: () => void;
 }) {
   const [selected, setSelected] = useState<string | null>(null);
-  const [showBoundary, setShowBoundary] = useState(true);
+  const [selectionError, setSelectionError] = useState<string | null>(null);
+  const [showBoundary, setShowBoundary] = useState(false);
+  const [savingPreference, setSavingPreference] = useState(false);
   const boundaryOpacity = useSharedValue(1);
+
+  useEffect(() => {
+    let mounted = true;
+    void getNotificationPreference()
+      .then((preference) => {
+        if (!mounted) return;
+        setShowBoundary(preference === undefined);
+        if (preference === "sure") void syncNotificationDevice();
+      })
+      .catch(() => {
+        if (mounted) setShowBoundary(true);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const dismissBoundary = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(
@@ -349,20 +539,58 @@ function Dashboard({
     setTimeout(() => setShowBoundary(false), 320);
   };
 
+  const chooseNotificationPreference = async (choice: "later" | "sure") => {
+    if (savingPreference) return;
+    setSavingPreference(true);
+    try {
+      await persistNotificationPreference(choice);
+      dismissBoundary();
+    } catch {
+      setSavingPreference(false);
+    }
+  };
+
   const boundaryOverlayStyle = useAnimatedStyle(() => ({
     opacity: boundaryOpacity.value,
   }));
 
-  const select = (id: string, action: () => void) => {
+  const select = async (id: string, action: () => void) => {
     setSelected(id);
+    setSelectionError(null);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
       () => undefined,
     );
-    setTimeout(() => {
+    try {
+      await persistDashboardSelection(
+        id.replace(".", "") as "focus" | "outdoors" | "breathe",
+      );
+      setTimeout(() => {
+        setSelected(null);
+        action();
+      }, 850);
+    } catch {
       setSelected(null);
-      action();
-    }, 850);
+      setSelectionError("Could not save your state. Try again.");
+    }
   };
+  const profileX = useSharedValue(0);
+  const profileGesture = Gesture.Pan()
+    .enabled(!selected && !showBoundary)
+    .onUpdate((event) => {
+      profileX.value =
+        event.translationX > 0 ? event.translationX : event.translationX * 0.1;
+    })
+    .onEnd((event) => {
+      if (event.translationX > 60) {
+        runOnJS(triggerImpact)(Haptics.ImpactFeedbackStyle.Medium);
+        runOnJS(onProfile)();
+      } else {
+        profileX.value = withSpring(0, { damping: 15, stiffness: 200 });
+      }
+    });
+  const profileStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: profileX.value }],
+  }));
   return (
     <ScreenFrame>
       <View
@@ -376,6 +604,9 @@ function Dashboard({
             choose a practice to shift the way you meet the day.
           </Text>
         </View>
+        {selectionError && (
+          <Text style={styles.selectionError}>{selectionError}</Text>
+        )}
         <View style={styles.aura}>
           <LinearGradient
             colors={["#e11d48", "#f97316", "#16a34a"]}
@@ -399,9 +630,13 @@ function Dashboard({
             />
           ))}
         </View>
-        <Pressable onPress={onProfile} style={styles.profileLink}>
-          <Text style={styles.profileText}>← your profile.</Text>
-        </Pressable>
+        <GestureDetector gesture={profileGesture}>
+          <Animated.View style={styles.profileLink}>
+            <Animated.Text style={[styles.profileText, profileStyle]}>
+              your profile. →
+            </Animated.Text>
+          </Animated.View>
+        </GestureDetector>
       </View>
       {showBoundary && (
         <Animated.View
@@ -413,7 +648,7 @@ function Dashboard({
             style={StyleSheet.absoluteFillObject}
           />
           <Animated.View
-            entering={SlideInDown.duration(600).springify().damping(18)}
+            entering={SlideInDown.duration(520)}
             exiting={SlideOutDown.duration(320)}
             style={styles.boundaryCard}
           >
@@ -424,12 +659,14 @@ function Dashboard({
             </Text>
             <View style={styles.boundaryActions}>
               <Pressable
-                onPress={dismissBoundary}
+                onPress={() => void chooseNotificationPreference("sure")}
                 style={styles.boundaryButton}
               >
                 <Text style={styles.boundaryButtonText}>i am clear →</Text>
               </Pressable>
-              <Pressable onPress={dismissBoundary}>
+              <Pressable
+                onPress={() => void chooseNotificationPreference("later")}
+              >
                 <Text style={styles.boundaryNotNow}>not now</Text>
               </Pressable>
             </View>
@@ -595,7 +832,15 @@ function FeatureList({
     </ScreenFrame>
   );
 }
-function Focus({ onBack }: { onBack: () => void }) {
+function Focus({
+  onBack,
+  onGetShitDone,
+  onAlienMode,
+}: {
+  onBack: () => void;
+  onGetShitDone: () => void;
+  onAlienMode: () => void;
+}) {
   const auraScale = useSharedValue(1);
   const auraMorph = useSharedValue(0);
   const auraExpand = useSharedValue(0);
@@ -690,7 +935,7 @@ function Focus({ onBack }: { onBack: () => void }) {
               label="sound tether & app lock"
               description="Connects Apple Music or Spotify. Activates background audio and automatically pauses playback if you stay actively on your phone for more than 2 minutes."
               auraExpand={auraExpand}
-              onLaunch={() => undefined}
+              onLaunch={onGetShitDone}
             />
             <FocusGateway
               title="alien mode."
@@ -699,7 +944,7 @@ function Focus({ onBack }: { onBack: () => void }) {
                 'Intercepts overwhelming tasks and prompts you with a "Beginner\'s Mind" question to reframe your perspective before the timer begins.'
               }
               auraExpand={auraExpand}
-              onLaunch={() => undefined}
+              onLaunch={onAlienMode}
             />
           </View>
         </ScrollView>
@@ -730,6 +975,7 @@ function FocusGateway({
   auraExpand: SharedValue<number>;
   onLaunch: () => void;
 }) {
+  const translateX = useSharedValue(0);
   const translateY = useSharedValue(0);
   const isGrabbed = useSharedValue(false);
   const gesture = Gesture.Pan()
@@ -738,6 +984,7 @@ function FocusGateway({
       runOnJS(triggerImpact)(Haptics.ImpactFeedbackStyle.Light);
     })
     .onUpdate((event) => {
+      translateX.value = Math.min(0, event.translationX);
       translateY.value = Math.min(0, event.translationY);
       auraExpand.value = withTiming(
         Math.min(1.2, Math.max(0, -event.translationY / 200)),
@@ -746,7 +993,7 @@ function FocusGateway({
     })
     .onEnd((event) => {
       isGrabbed.value = false;
-      if (event.translationY < -110) {
+      if (event.translationX < -80) {
         auraExpand.value = withTiming(2.5, { duration: 350 });
         runOnJS(triggerNotification)(Haptics.NotificationFeedbackType.Success);
         runOnJS(onLaunch)();
@@ -757,6 +1004,7 @@ function FocusGateway({
     });
   const style = useAnimatedStyle(() => ({
     transform: [
+      { translateX: translateX.value },
       { translateY: translateY.value },
       { scale: isGrabbed.value ? 1.03 : 1 },
     ],
@@ -769,6 +1017,7 @@ function FocusGateway({
         <Text style={styles.focusGatewayTitle}>{title}</Text>
         <Text style={styles.focusGatewayLabel}>{label}</Text>
         <Text style={styles.focusGatewayDescription}>{description}</Text>
+        <Text style={styles.focusGatewayHint}>← swipe left to open</Text>
       </Animated.View>
     </GestureDetector>
   );
@@ -875,6 +1124,17 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     letterSpacing: -2,
   },
+  logoGroup: {
+    alignItems: "center",
+    zIndex: 10,
+  },
+  tagline: {
+    marginTop: 8,
+    color: "rgba(255,255,255,0.72)",
+    fontSize: 13,
+    fontWeight: "600",
+    letterSpacing: 1.5,
+  },
   fork: {
     flex: 1,
     flexDirection: "row",
@@ -892,11 +1152,27 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
   },
   auth: { flexGrow: 1, justifyContent: "center", padding: 28, gap: 28 },
+  authKeyboard: { flex: 1 },
   lightTitle: {
     color: "#111",
     fontSize: 52,
     fontWeight: "900",
     letterSpacing: -2,
+  },
+  darkAuthTitle: { color: colors.white },
+  darkAuthMuted: { color: "rgba(255,255,255,0.5)" },
+  darkAuthAction: { color: colors.white },
+  authBackLink: {
+    color: "#777",
+    fontSize: 14,
+    fontWeight: "700",
+    marginBottom: 24,
+  },
+  authIntro: {
+    color: "#777",
+    fontSize: 16,
+    lineHeight: 24,
+    maxWidth: 340,
   },
   inputGroup: { gap: 18 },
   input: {
@@ -905,6 +1181,10 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: "#ccc",
     paddingVertical: 10,
+  },
+  darkInput: {
+    color: colors.white,
+    borderBottomColor: "#3a3a3a",
   },
   terms: { flexDirection: "row", alignItems: "center", gap: 10 },
   check: { width: 20, height: 20, borderWidth: 1, borderColor: "#aaa" },
@@ -923,6 +1203,12 @@ const styles = StyleSheet.create({
     marginTop: 22,
   },
   subtle: { color: "#858585", fontSize: 14, lineHeight: 21, marginTop: 12 },
+  selectionError: {
+    color: "#fca5a5",
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 12,
+  },
   aura: {
     position: "absolute",
     top: -90,
@@ -976,7 +1262,7 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
     padding: 28,
-    paddingTop: 34,
+    paddingTop: 58,
     paddingBottom: 42,
   },
   boundaryTitle: {
@@ -1060,6 +1346,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingVertical: 12,
     marginBottom: 24,
+    transform: [{ translateY: 60 }],
   },
   focusBackLabel: {
     color: "#e11d48",
@@ -1137,6 +1424,14 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 23,
     marginTop: 14,
+  },
+  focusGatewayHint: {
+    color: "#e11d48",
+    fontSize: 12,
+    fontWeight: "800",
+    letterSpacing: 1.2,
+    marginTop: 18,
+    textTransform: "uppercase",
   },
   featureTitle: {
     color: colors.white,

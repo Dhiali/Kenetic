@@ -164,6 +164,7 @@ export default function FinishedScreen({
           </Animated.Text>
         </GestureDetector>
       </View>
+      <Text style={styles.dragInstruction}>drag and drop to complete</Text>
     </Animated.View>
   );
 }
@@ -199,6 +200,18 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     letterSpacing: -2,
     textTransform: "lowercase",
+  },
+  dragInstruction: {
+    position: "absolute",
+    bottom: 72,
+    maxWidth: 260,
+    color: "rgba(255, 255, 255, 0.58)",
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 1.4,
+    lineHeight: 18,
+    textAlign: "center",
+    textTransform: "uppercase",
   },
   wipeCircle: {
     position: "absolute",

@@ -6,7 +6,6 @@ export type ScreenState =
   | "CAROUSEL"
   | "FOG"
   | "RITUAL"
-  | "GATEWAY"
   | "BOUNDARY"
   | "DASHBOARD"
   | "PROFILE"

@@ -4,6 +4,7 @@
     "slug": "kenetic",
     "version": "1.0.0",
     "orientation": "portrait",
+    "scheme": "kenetic",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#0a0a0a",
     "splash": {
@@ -11,23 +12,41 @@
     },
     "assetBundlePatterns": ["**/*"],
     "ios": {
+      "bundleIdentifier": "com.dhiali.kenetic",
+      "usesAppleSignIn": true,
       "supportsTablet": false,
       "infoPlist": {
-        "NSCameraUsageDescription": "kenetic uses your camera to identify natural patterns during Outdoors sessions."
+        "NSCameraUsageDescription": "kenetic uses your camera to identify natural patterns during Outdoors sessions.",
+        "NSMicrophoneUsageDescription": "kenetic uses your microphone to identify ambient nature sounds during Outdoors sessions.",
+        "NSLocationWhenInUseUsageDescription": "kenetic uses your location to find nearby trails, waters, and natural sanctuaries."
       }
     },
     "android": {
+      "package": "com.dhiali.kenetic",
       "adaptiveIcon": {
         "backgroundColor": "#0a0a0a"
       },
-      "permissions": ["CAMERA"]
+      "permissions": [
+        "CAMERA",
+        "RECORD_AUDIO",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION"
+      ]
     },
     "plugins": [
       "expo-notifications",
+      "expo-apple-authentication",
       [
         "expo-camera",
         {
-          "cameraPermission": "kenetic uses your camera to identify natural patterns during Outdoors sessions."
+          "cameraPermission": "kenetic uses your camera to identify natural patterns during Outdoors sessions.",
+          "microphonePermission": "kenetic uses your microphone to identify ambient nature sounds during Outdoors sessions."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "kenetic uses your location to find nearby trails, waters, and natural sanctuaries."
         }
       ]
     ]

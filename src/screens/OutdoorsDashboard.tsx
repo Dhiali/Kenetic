@@ -19,14 +19,18 @@ import Animated, {
 
 type Props = {
   onBack: () => void;
-  onGetShitDone?: () => void;
-  onAlienMode?: () => void;
+  onBioRadar?: () => void;
+  onCuriosity?: () => void;
+  onSpotFinder?: () => void;
+  onChallenges?: () => void;
 };
 
-export default function FocusDashboard({
+export default function OutdoorsDashboard({
   onBack,
-  onGetShitDone = () => undefined,
-  onAlienMode = () => undefined,
+  onBioRadar = () => undefined,
+  onCuriosity = () => undefined,
+  onSpotFinder = () => undefined,
+  onChallenges = () => undefined,
 }: Props) {
   const auraScale = useSharedValue(1);
   const auraMorph = useSharedValue(0);
@@ -57,11 +61,8 @@ export default function FocusDashboard({
       if (event.translationX > 0) exitX.value = event.translationX;
     })
     .onEnd((event) => {
-      if (event.translationX > 80) {
-        runOnJS(onBack)();
-      } else {
-        exitX.value = withSpring(0, { damping: 15, stiffness: 200 });
-      }
+      if (event.translationX > 80) runOnJS(onBack)();
+      else exitX.value = withSpring(0, { damping: 15, stiffness: 200 });
     });
 
   const auraStyle = useAnimatedStyle(() => ({
@@ -84,7 +85,7 @@ export default function FocusDashboard({
     >
       <Animated.View style={[styles.aura, auraStyle]}>
         <LinearGradient
-          colors={["#b3133b", "#e11d48", "rgba(225,29,72,0)"]}
+          colors={["#14532d", "#16a34a", "rgba(22,163,74,0)"]}
           locations={[0, 0.48, 1]}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
@@ -103,29 +104,46 @@ export default function FocusDashboard({
         <GestureDetector gesture={exitGesture}>
           <View style={styles.nav}>
             <Text style={styles.back}>← dashboard </Text>
-            <Text style={styles.hint}>(drag right to exit focus state)</Text>
+            <Text style={styles.hint}>(drag right to exit outdoors state)</Text>
           </View>
         </GestureDetector>
-        <Text style={styles.title}>focus state.</Text>
+        <Text style={styles.title}>outdoors state.</Text>
+        <Text style={styles.manifesto}>
+          connecting with yourself and the environment around you through the
+          practice of ecotherapy and somatic movement.
+        </Text>
         <View style={styles.metrics}>
-          <Metric value="3.5h" label="deep session total today" />
-          <Metric value="88%" label="off-screen tether score" />
-          <Metric value="12" label="tasks deconstructed" />
+          <Metric value="18" label="species scanned in nature" />
+          <Metric value="12.5h" label="ecotherapy time recorded" />
+          <Metric value="5" label="trails & outdoor spots explored" />
+          <Metric value="8" label="mindfulness challenges completed" />
         </View>
         <View style={styles.gateways}>
           <Gateway
-            title="get shit done."
-            label="sound tether & app lock"
-            description="Connects Apple Music or Spotify. Activates background audio and automatically pauses playback if you stay actively on your phone for more than 2 minutes."
-            onLaunch={onGetShitDone}
+            title="bio radar ai."
+            label="visual & acoustic species scanner"
+            description="Point your camera or microphone at plants, animals, or ambient nature sounds to generate a stark, Swiss-designed breakdown card detailing what it is and its ecological significance."
+            onLaunch={onBioRadar}
           />
           <Gateway
-            title="alien mode."
-            label="ai task deconstructor"
+            title="curiosity quizzes."
+            label="adaptive knowledge retention"
+            description="AI-generated daily questions based directly on your Bio Radar scan history, turning your real-world discoveries into long-term environmental knowledge."
+            onLaunch={onCuriosity}
+          />
+          <Gateway
+            title="spot finder."
+            label="trails, waters & sanctuaries"
+            description="Discover nearby hiking trails, fishing spots, and natural parks. Activate location-bound challenges when arriving at a spot to earn physical restoration badges and rewards."
+            onLaunch={onSpotFinder}
+          />
+          <Gateway
+            title="daily challenges."
+            label="everyday outdoor grounding"
             description={
-              'Intercepts overwhelming tasks and prompts you with a "Beginner\'s Mind" question to reframe your perspective before the timer begins.'
+              'Simple, perceptive tasks for an ordinary day outside (e.g., "Find a natural pattern that mimics a fish" or "Locate three distinct bark textures").'
             }
-            onLaunch={onAlienMode}
+            onLaunch={onChallenges}
           />
         </View>
       </ScrollView>
@@ -153,6 +171,7 @@ function Gateway({
   description: string;
   onLaunch: () => void;
 }) {
+  const x = useSharedValue(0);
   const y = useSharedValue(0);
   const active = useSharedValue(false);
   const gesture = Gesture.Pan()
@@ -163,17 +182,22 @@ function Gateway({
       );
     })
     .onUpdate((event) => {
+      x.value = Math.min(0, event.translationX);
       y.value = Math.min(0, event.translationY);
     })
     .onEnd((event) => {
       active.value = false;
-      if (event.translationX < -80) {
-        runOnJS(onLaunch)();
-      }
+      if (event.translationX < -80) runOnJS(onLaunch)();
+      x.value = withSpring(0, { damping: 16, stiffness: 180 });
       y.value = withSpring(0, { damping: 16, stiffness: 180 });
     });
   const style = useAnimatedStyle(() => ({
-    transform: [{ translateY: y.value }, { scale: active.value ? 1.03 : 1 }],
+    transform: [
+      { translateX: x.value },
+      { translateY: y.value },
+      { scale: active.value ? 1.03 : 1 },
+    ],
+    opacity: active.value ? 0.88 : 1,
   }));
   return (
     <GestureDetector gesture={gesture}>
@@ -192,12 +216,12 @@ const styles = StyleSheet.create({
   aura: {
     position: "absolute",
     top: -150,
-    left: -90,
+    right: -80,
     width: 430,
     height: 420,
     borderRadius: 220,
     overflow: "hidden",
-    shadowColor: "#e11d48",
+    shadowColor: "#16a34a",
     shadowOpacity: 0.55,
     shadowRadius: 60,
     shadowOffset: { width: 0, height: 14 },
@@ -211,7 +235,7 @@ const styles = StyleSheet.create({
     marginTop: 60,
     marginBottom: 24,
   },
-  back: { color: "#e11d48", fontSize: 15, fontWeight: "700" },
+  back: { color: "#16a34a", fontSize: 15, fontWeight: "700" },
   hint: { color: "rgba(255,255,255,0.35)", fontSize: 13, fontWeight: "500" },
   title: {
     color: "#fff",
@@ -220,6 +244,13 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     letterSpacing: -2,
     marginBottom: 36,
+  },
+  manifesto: {
+    color: "rgba(255,255,255,0.62)",
+    fontSize: 15,
+    lineHeight: 23,
+    marginTop: -20,
+    marginBottom: 32,
   },
   metrics: { gap: 18, marginBottom: 64 },
   metric: { flexDirection: "row", alignItems: "baseline", gap: 14 },
@@ -248,7 +279,7 @@ const styles = StyleSheet.create({
     letterSpacing: -1.5,
   },
   gatewayLabel: {
-    color: "#e11d48",
+    color: "#16a34a",
     fontSize: 12,
     fontWeight: "800",
     letterSpacing: 1.4,
@@ -262,7 +293,7 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   gatewayHint: {
-    color: "#e11d48",
+    color: "#16a34a",
     fontSize: 12,
     fontWeight: "800",
     letterSpacing: 1.2,
