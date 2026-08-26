@@ -18,14 +18,20 @@ import {
     createBreatheExerciseLaunch,
     createDashboardSelection,
     createFocusFeatureLaunch,
+    createOutdoorFeatureLaunch,
+    createQuizHistory,
+    createScanHistory,
     createUserProfile,
     deleteUserData,
     getBreatheDashboardMetrics,
     getFocusDashboardMetrics,
+    getOutdoorDashboardMetrics,
     getUserProfile,
     markOnboardingComplete,
+    saveChallengeProgress,
     saveInitialIntention,
     saveNotificationPreference,
+    savePlace,
     saveRegisteredUserProfile,
     startSession,
     updateProfileDetails,
@@ -279,11 +285,107 @@ export async function loadBreatheDashboardMetrics() {
   return getBreatheDashboardMetrics(user.uid);
 }
 
+export async function loadOutdoorDashboardMetrics() {
+  const user = await ensureAnonymousUser();
+  return getOutdoorDashboardMetrics(user.uid);
+}
+
 export async function persistBreatheExerciseLaunch(
   exercise: "calm-down" | "recenter" | "clear-mind" | "deep-relax",
 ) {
   const user = await ensureAnonymousUser();
   await createBreatheExerciseLaunch(user.uid, exercise);
+}
+
+export async function persistOutdoorScan(scan: {
+  source: "camera" | "microphone" | "manual";
+  title: string;
+  scientificName?: string;
+  summary?: string;
+  ecologicalSignificance?: string;
+  somaticPrompt?: string;
+  includeInDailyQuizzes?: boolean;
+  mode?: "visual" | "acoustic";
+  engine?: "deterministic-v1";
+  scanSessionId?: string;
+  matchScore?: number;
+  capturedAssetUri?: string;
+  latitude?: number;
+  longitude?: number;
+}) {
+  const user = await ensureAnonymousUser();
+  await createScanHistory(user.uid, scan);
+}
+
+export async function persistOutdoorFeatureLaunch(
+  feature: "bio-radar" | "quizzes" | "spot-finder" | "daily-challenges",
+) {
+  const user = await ensureAnonymousUser();
+  await createOutdoorFeatureLaunch(user.uid, feature);
+}
+
+export async function startBioRadarSession(mode: "visual" | "acoustic") {
+  const user = await ensureAnonymousUser();
+  const session = await startSession(user.uid, "outdoors", {
+    mode: "bio-radar",
+    scanMode: mode,
+  });
+  return session.id;
+}
+
+export async function finishBioRadarSession(
+  sessionId: string,
+  durationSeconds: number,
+  completed: boolean,
+  metadata?: Record<string, unknown>,
+) {
+  const user = await ensureAnonymousUser();
+  if (completed) {
+    await completeSession(user.uid, sessionId, durationSeconds, {
+      mode: "bio-radar",
+      ...(metadata ?? {}),
+    });
+  } else {
+    await abandonSession(user.uid, sessionId, {
+      mode: "bio-radar",
+      ...(metadata ?? {}),
+    });
+  }
+}
+
+export async function persistOutdoorQuizResult(result: {
+  questionId: string;
+  prompt: string;
+  correct: boolean;
+}) {
+  const user = await ensureAnonymousUser();
+  await createQuizHistory(user.uid, result);
+}
+
+export async function persistOutdoorChallenge(
+  challengeId: string,
+  status: "available" | "started" | "completed",
+  metadata?: Record<string, unknown>,
+) {
+  const user = await ensureAnonymousUser();
+  await saveChallengeProgress(user.uid, challengeId, {
+    status,
+    metadata,
+    ...(status === "started" ? { startedAt: new Date() } : {}),
+    ...(status === "completed" ? { completedAt: new Date() } : {}),
+  });
+}
+
+export async function persistOutdoorPlace(place: {
+  placeId: string;
+  name: string;
+  address?: string;
+  latitude?: number;
+  longitude?: number;
+  category?: string;
+}) {
+  const user = await ensureAnonymousUser();
+  await savePlace(user.uid, place.placeId, place);
 }
 
 export async function persistFocusFeatureLaunch(

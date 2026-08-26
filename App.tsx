@@ -17,6 +17,7 @@ import GsdSetupScreen from "./src/screens/GsdSetupScreen";
 import IntakeCarousel from "./src/screens/IntakeCarousel";
 import LoginScreen from "./src/screens/LoginScreen";
 import OnboardingScreen from "./src/screens/OnboardingScreen";
+import OutdoorFeatureScreen from "./src/screens/OutdoorFeatureScreen";
 import OutdoorsDashboard from "./src/screens/OutdoorsDashboard";
 import ProfileScreen from "./src/screens/ProfileScreen";
 import SignupScreen from "./src/screens/SignupScreen";
@@ -201,10 +202,38 @@ export default function App() {
         return (
           <OutdoorsDashboard
             onBack={() => goTo("DASHBOARD")}
-            onBioRadar={() => goTo("OUTDOORS_FEATURE")}
-            onCuriosity={() => goTo("OUTDOORS_FEATURE")}
-            onSpotFinder={() => goTo("OUTDOORS_FEATURE")}
-            onChallenges={() => goTo("OUTDOORS_FEATURE")}
+            onBioRadar={() => goTo("OUTDOORS_BIO")}
+            onCuriosity={() => goTo("OUTDOORS_QUIZZES")}
+            onSpotFinder={() => goTo("OUTDOORS_SPOTS")}
+            onChallenges={() => goTo("OUTDOORS_CHALLENGES")}
+          />
+        );
+      case "OUTDOORS_BIO":
+        return (
+          <OutdoorFeatureScreen
+            feature="bio-radar"
+            onBack={() => goTo("OUTDOORS_DASHBOARD")}
+          />
+        );
+      case "OUTDOORS_QUIZZES":
+        return (
+          <OutdoorFeatureScreen
+            feature="quizzes"
+            onBack={() => goTo("OUTDOORS_DASHBOARD")}
+          />
+        );
+      case "OUTDOORS_SPOTS":
+        return (
+          <OutdoorFeatureScreen
+            feature="spot-finder"
+            onBack={() => goTo("OUTDOORS_DASHBOARD")}
+          />
+        );
+      case "OUTDOORS_CHALLENGES":
+        return (
+          <OutdoorFeatureScreen
+            feature="daily-challenges"
+            onBack={() => goTo("OUTDOORS_DASHBOARD")}
           />
         );
       case "OUTDOORS_FEATURE":

@@ -16,6 +16,7 @@ import Animated, {
     withSpring,
     withTiming,
 } from "react-native-reanimated";
+import { loadOutdoorDashboardMetrics } from "../lib/firebase/bootstrap";
 
 type Props = {
   onBack: () => void;
@@ -32,11 +33,21 @@ export default function OutdoorsDashboard({
   onSpotFinder = () => undefined,
   onChallenges = () => undefined,
 }: Props) {
+  const [metrics, setMetrics] = React.useState({
+    speciesScanned: 0,
+    quizAttempts: 0,
+    masteryIndex: 0,
+    activeLearningDays: 0,
+  });
+  const [metricsError, setMetricsError] = React.useState(false);
   const auraScale = useSharedValue(1);
   const auraMorph = useSharedValue(0);
   const exitX = useSharedValue(0);
 
   useEffect(() => {
+    void loadOutdoorDashboardMetrics()
+      .then(setMetrics)
+      .catch(() => setMetricsError(true));
     auraScale.value = withRepeat(
       withSequence(
         withTiming(1.08, { duration: 2600, easing: Easing.inOut(Easing.ease) }),
@@ -103,42 +114,59 @@ export default function OutdoorsDashboard({
       >
         <GestureDetector gesture={exitGesture}>
           <View style={styles.nav}>
-            <Text style={styles.back}>← dashboard </Text>
+            <Text style={styles.back}>← Dashboard </Text>
             <Text style={styles.hint}>(drag right to exit outdoors state)</Text>
           </View>
         </GestureDetector>
-        <Text style={styles.title}>outdoors state.</Text>
+        <Text style={styles.title}>Outdoors state.</Text>
         <Text style={styles.manifesto}>
-          connecting with yourself and the environment around you through the
+          Connecting with yourself and the environment around you through the
           practice of ecotherapy and somatic movement.
         </Text>
         <View style={styles.metrics}>
-          <Metric value="18" label="species scanned in nature" />
-          <Metric value="12.5h" label="ecotherapy time recorded" />
-          <Metric value="5" label="trails & outdoor spots explored" />
-          <Metric value="8" label="mindfulness challenges completed" />
+          <Metric
+            value={`${metrics.speciesScanned}`}
+            label="species scanned in nature"
+          />
+          <Metric
+            value={`${metrics.quizAttempts}`}
+            label="curiosity quiz answers logged"
+          />
+          <Metric
+            value={`${metrics.masteryIndex}%`}
+            label="knowledge retention / mastery index"
+          />
+          <Metric
+            value={`${metrics.activeLearningDays}`}
+            label="active learning days this week"
+          />
         </View>
+        {metricsError && (
+          <Text style={styles.metricsError}>
+            Ledger unavailable. Your feature activity will retry next time.
+          </Text>
+        )}
         <View style={styles.gateways}>
           <Gateway
-            title="bio radar ai."
+            title="Bio Radar AI."
             label="visual & acoustic species scanner"
-            description="Point your camera or microphone at plants, animals, or ambient nature sounds to generate a stark, Swiss-designed breakdown card detailing what it is and its ecological significance."
+            description="Point your camera or microphone at plants or animals to generate a stark, Swiss-designed breakdown card detailing what it is and its ecological significance."
             onLaunch={onBioRadar}
           />
           <Gateway
-            title="curiosity quizzes."
+            title="Curiosity Quizzes."
             label="adaptive knowledge retention"
             description="AI-generated daily questions based directly on your Bio Radar scan history, turning your real-world discoveries into long-term environmental knowledge."
             onLaunch={onCuriosity}
           />
           <Gateway
-            title="spot finder."
+            title="Spot Finder."
             label="trails, waters & sanctuaries"
             description="Discover nearby hiking trails, fishing spots, and natural parks. Activate location-bound challenges when arriving at a spot to earn physical restoration badges and rewards."
             onLaunch={onSpotFinder}
           />
           <Gateway
-            title="daily challenges."
+            title="Daily Challenges."
             label="everyday outdoor grounding"
             description={
               'Simple, perceptive tasks for an ordinary day outside (e.g., "Find a natural pattern that mimics a fish" or "Locate three distinct bark textures").'
@@ -174,12 +202,17 @@ function Gateway({
   const x = useSharedValue(0);
   const y = useSharedValue(0);
   const active = useSharedValue(false);
+
+  const triggerLightHaptic = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(
+      () => undefined,
+    );
+  };
+
   const gesture = Gesture.Pan()
     .onStart(() => {
       active.value = true;
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(
-        () => undefined,
-      );
+      runOnJS(triggerLightHaptic)();
     })
     .onUpdate((event) => {
       x.value = Math.min(0, event.translationX);
@@ -253,6 +286,13 @@ const styles = StyleSheet.create({
     marginBottom: 32,
   },
   metrics: { gap: 18, marginBottom: 64 },
+  metricsError: {
+    color: "rgba(255,255,255,0.5)",
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: -48,
+    marginBottom: 48,
+  },
   metric: { flexDirection: "row", alignItems: "baseline", gap: 14 },
   metricValue: {
     color: "#fff",

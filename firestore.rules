@@ -151,6 +151,24 @@ service cloud.firestore {
             || request.resource.data.summary is string)
           && (!('ecologicalSignificance' in request.resource.data)
             || request.resource.data.ecologicalSignificance is string)
+          && (!('scientificName' in request.resource.data)
+            || request.resource.data.scientificName is string)
+          && (!('somaticPrompt' in request.resource.data)
+            || request.resource.data.somaticPrompt is string)
+          && (!('includeInDailyQuizzes' in request.resource.data)
+            || request.resource.data.includeInDailyQuizzes is bool)
+          && (!('mode' in request.resource.data)
+            || request.resource.data.mode in ['visual', 'acoustic'])
+          && (!('engine' in request.resource.data)
+            || request.resource.data.engine in ['deterministic-v1'])
+          && (!('scanSessionId' in request.resource.data)
+            || request.resource.data.scanSessionId is string)
+          && (!('matchScore' in request.resource.data)
+            || (request.resource.data.matchScore is number
+              && request.resource.data.matchScore >= 0
+              && request.resource.data.matchScore <= 100))
+          && (!('capturedAssetUri' in request.resource.data)
+            || request.resource.data.capturedAssetUri is string)
           && (!('latitude' in request.resource.data)
             || request.resource.data.latitude is number)
           && (!('longitude' in request.resource.data)
@@ -185,6 +203,34 @@ service cloud.firestore {
             || request.resource.data.address is string)
           && (!('category' in request.resource.data)
             || request.resource.data.category is string);
+      }
+
+      match /quizHistory/{quizId} {
+        allow read, delete: if ownsUser(userId);
+        allow create: if ownsUser(userId)
+          && request.resource.data.keys().hasAll([
+            'questionId',
+            'prompt',
+            'source',
+            'correct',
+            'answeredAt'
+          ])
+          && request.resource.data.questionId is string
+          && request.resource.data.prompt is string
+          && request.resource.data.source == 'curiosity-quizzes'
+          && request.resource.data.correct is bool
+          && request.resource.data.answeredAt is timestamp;
+        allow update: if false;
+      }
+
+      match /outdoorFeatureLaunches/{launchId} {
+        allow read, delete: if ownsUser(userId);
+        allow create: if ownsUser(userId)
+          && request.resource.data.keys().hasAll(['feature', 'source', 'launchedAt'])
+          && request.resource.data.feature in ['bio-radar', 'quizzes', 'spot-finder', 'daily-challenges']
+          && request.resource.data.source == 'outdoors-dashboard'
+          && request.resource.data.launchedAt is timestamp;
+        allow update: if false;
       }
 
       match /intentions/{intentionId} {

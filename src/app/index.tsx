@@ -17,6 +17,7 @@ import GsdSetupScreen from "@/screens/GsdSetupScreen";
 import IntakeCarousel from "@/screens/IntakeCarousel";
 import LoginScreen from "@/screens/LoginScreen";
 import OnboardingScreen from "@/screens/OnboardingScreen";
+import OutdoorFeatureScreen from "@/screens/OutdoorFeatureScreen";
 import OutdoorsDashboard from "@/screens/OutdoorsDashboard";
 import ProfileScreen from "@/screens/ProfileScreen";
 import SignupScreen from "@/screens/SignupScreen";
@@ -70,7 +71,11 @@ type Screen =
   | "BREATHE"
   | "BREATHE_SETUP"
   | "OUTDOORS"
-  | "OUTDOORS_FEATURE";
+  | "OUTDOORS_FEATURE"
+  | "OUTDOORS_BIO"
+  | "OUTDOORS_QUIZZES"
+  | "OUTDOORS_SPOTS"
+  | "OUTDOORS_CHALLENGES";
 type Accent = "#e11d48" | "#f97316" | "#16a34a" | "#3b82f6";
 const colors = {
   black: "#0a0a0a",
@@ -217,10 +222,32 @@ export default function Index() {
     return (
       <OutdoorsDashboard
         onBack={() => go("DASHBOARD")}
-        onBioRadar={() => go("OUTDOORS_FEATURE")}
-        onCuriosity={() => go("OUTDOORS_FEATURE")}
-        onSpotFinder={() => go("OUTDOORS_FEATURE")}
-        onChallenges={() => go("OUTDOORS_FEATURE")}
+        onBioRadar={() => go("OUTDOORS_BIO")}
+        onCuriosity={() => go("OUTDOORS_QUIZZES")}
+        onSpotFinder={() => go("OUTDOORS_SPOTS")}
+        onChallenges={() => go("OUTDOORS_CHALLENGES")}
+      />
+    );
+  if (screen === "OUTDOORS_BIO")
+    return (
+      <OutdoorFeatureScreen feature="bio-radar" onBack={() => go("OUTDOORS")} />
+    );
+  if (screen === "OUTDOORS_QUIZZES")
+    return (
+      <OutdoorFeatureScreen feature="quizzes" onBack={() => go("OUTDOORS")} />
+    );
+  if (screen === "OUTDOORS_SPOTS")
+    return (
+      <OutdoorFeatureScreen
+        feature="spot-finder"
+        onBack={() => go("OUTDOORS")}
+      />
+    );
+  if (screen === "OUTDOORS_CHALLENGES")
+    return (
+      <OutdoorFeatureScreen
+        feature="daily-challenges"
+        onBack={() => go("OUTDOORS")}
       />
     );
   if (screen === "OUTDOORS_FEATURE")

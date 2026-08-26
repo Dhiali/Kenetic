@@ -70,8 +70,16 @@ export type DeviceRecord = {
 export type ScanHistoryRecord = {
   source: "camera" | "microphone" | "manual";
   title: string;
+  scientificName?: string;
   summary?: string;
   ecologicalSignificance?: string;
+  somaticPrompt?: string;
+  includeInDailyQuizzes?: boolean;
+  mode?: "visual" | "acoustic";
+  engine?: "deterministic-v1";
+  scanSessionId?: string;
+  matchScore?: number;
+  capturedAssetUri?: string;
   latitude?: number;
   longitude?: number;
   capturedAt: unknown;
@@ -119,6 +127,20 @@ export type BreatheExerciseLaunchRecord = {
   exercise: "calm-down" | "recenter" | "clear-mind" | "deep-relax";
   source: "breathe-dashboard";
   launchedAt: unknown;
+};
+
+export type OutdoorFeatureLaunchRecord = {
+  feature: "bio-radar" | "quizzes" | "spot-finder" | "daily-challenges";
+  source: "outdoors-dashboard";
+  launchedAt: unknown;
+};
+
+export type QuizHistoryRecord = {
+  questionId: string;
+  prompt: string;
+  source: "curiosity-quizzes";
+  correct: boolean;
+  answeredAt: unknown;
 };
 
 export function userReference(uid: string): DocumentReference<UserProfile> {
@@ -246,6 +268,32 @@ export const focusFeatureLaunchesCollection = (uid: string) =>
   userCollection<FocusFeatureLaunchRecord>(uid, "focusFeatureLaunches");
 export const breatheExerciseLaunchesCollection = (uid: string) =>
   userCollection<BreatheExerciseLaunchRecord>(uid, "breatheExerciseLaunches");
+export const outdoorFeatureLaunchesCollection = (uid: string) =>
+  userCollection<OutdoorFeatureLaunchRecord>(uid, "outdoorFeatureLaunches");
+export const quizHistoryCollection = (uid: string) =>
+  userCollection<QuizHistoryRecord>(uid, "quizHistory");
+
+export function createOutdoorFeatureLaunch(
+  uid: string,
+  feature: OutdoorFeatureLaunchRecord["feature"],
+) {
+  return addDoc(outdoorFeatureLaunchesCollection(uid), {
+    feature,
+    source: "outdoors-dashboard",
+    launchedAt: serverTimestamp(),
+  });
+}
+
+export function createQuizHistory(
+  uid: string,
+  entry: Omit<QuizHistoryRecord, "source" | "answeredAt">,
+) {
+  return addDoc(quizHistoryCollection(uid), {
+    ...entry,
+    source: "curiosity-quizzes",
+    answeredAt: serverTimestamp(),
+  });
+}
 
 export function createBreatheExerciseLaunch(
   uid: string,
@@ -464,6 +512,8 @@ export async function deleteUserData(uid: string) {
     "savedPlaces",
     "intentions",
     "dashboardSelections",
+    "outdoorFeatureLaunches",
+    "quizHistory",
   ];
 
   for (const name of subcollections) {
@@ -506,6 +556,72 @@ export function savePlace(
     { ...place, placeId, savedAt: serverTimestamp() },
     { merge: true },
   );
+}
+
+export async function getOutdoorDashboardMetrics(uid: string) {
+  const [scans, quizzes, sessionsSnapshot] = await Promise.all([
+    getDocs(scanHistoryCollection(uid)),
+    getDocs(quizHistoryCollection(uid)),
+    getDocs(sessionsCollection(uid)),
+  ]);
+  const quizEntries = quizzes.docs.map((item) => item.data());
+  const quizAttempts = quizEntries.length;
+  const quizCorrect = quizEntries.filter((entry) => entry.correct).length;
+  const masteryIndex = quizAttempts
+    ? Math.round((quizCorrect / quizAttempts) * 100)
+    : 0;
+
+  const now = new Date();
+  const weekStart = new Date(now);
+  const daysSinceMonday = (now.getDay() + 6) % 7;
+  weekStart.setDate(now.getDate() - daysSinceMonday);
+  weekStart.setHours(0, 0, 0, 0);
+  const thisWeek = quizEntries.filter((entry) => {
+    const timestamp = entry.answeredAt as { toMillis?: () => number };
+    return typeof timestamp?.toMillis === "function"
+      ? timestamp.toMillis() >= weekStart.getTime()
+      : false;
+  });
+  const activeLearningDays = new Set(
+    thisWeek.map((entry) => {
+      const timestamp = entry.answeredAt as { toMillis?: () => number };
+      const millis = timestamp.toMillis?.() ?? 0;
+      const date = new Date(millis);
+      return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+    }),
+  ).size;
+
+  const bioRadarSessions = sessionsSnapshot.docs
+    .map((item) => item.data())
+    .filter(
+      (session) =>
+        session.type === "outdoors" && session.metadata?.mode === "bio-radar",
+    );
+  const bioRadarThisWeek = bioRadarSessions.filter((session) => {
+    const timestamp = session.startedAt as { toMillis?: () => number };
+    return typeof timestamp?.toMillis === "function"
+      ? timestamp.toMillis() >= weekStart.getTime()
+      : false;
+  });
+  const finalizedBioRadarSessions = bioRadarThisWeek.filter(
+    (session) =>
+      session.status === "completed" || session.status === "abandoned",
+  ).length;
+  const orphanedBioRadarSessions = bioRadarThisWeek.filter(
+    (session) => session.status === "started",
+  ).length;
+  const recoveryIndex = bioRadarThisWeek.length
+    ? Math.round((finalizedBioRadarSessions / bioRadarThisWeek.length) * 100)
+    : 100;
+
+  return {
+    speciesScanned: scans.size,
+    quizAttempts,
+    masteryIndex,
+    activeLearningDays,
+    orphanedBioRadarSessions,
+    recoveryIndex,
+  };
 }
 
 export function userSubcollection<T extends DocumentData>(
