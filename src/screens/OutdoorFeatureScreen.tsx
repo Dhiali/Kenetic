@@ -186,9 +186,20 @@ export default function OutdoorFeatureScreen({ feature, onBack }: Props) {
 }
 
 function BioRadarExperience({ onBack }: { onBack: () => void }) {
-  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
-  const [microphonePermission, requestMicrophonePermission] =
-    useMicrophonePermissions();
+  const cameraPermissionHook = useCameraPermissions();
+  const microphonePermissionHook = useMicrophonePermissions();
+  const cameraPermission = Array.isArray(cameraPermissionHook)
+    ? cameraPermissionHook[0]
+    : null;
+  const requestCameraPermission = Array.isArray(cameraPermissionHook)
+    ? cameraPermissionHook[1]
+    : async () => null;
+  const microphonePermission = Array.isArray(microphonePermissionHook)
+    ? microphonePermissionHook[0]
+    : null;
+  const requestMicrophonePermission = Array.isArray(microphonePermissionHook)
+    ? microphonePermissionHook[1]
+    : async () => null;
   const cameraReference = useRef<CameraView | null>(null);
 
   const holdHumInterval = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -776,7 +787,7 @@ function QuizzesExperience({ onBack }: { onBack: () => void }) {
   const transitionX = useSharedValue(0);
   const recallY = useSharedValue(0);
   const waveOpacity = useSharedValue(0);
-  const retainedY = useSharedValue(0);
+  const retainedX = useSharedValue(0);
   const option0Y = useSharedValue(0);
   const option1Y = useSharedValue(0);
   const option2Y = useSharedValue(0);
@@ -863,6 +874,14 @@ function QuizzesExperience({ onBack }: { onBack: () => void }) {
     );
   };
 
+  const quizTruthCircleStyle = useAnimatedStyle(() => ({
+    transform: [
+      { scale: interpolate(truthPulse.value, [0, 1], [0.94, 1.08]) },
+      { scaleX: interpolate(truthPulse.value, [0, 1], [1, 1.07]) },
+      { scaleY: interpolate(truthPulse.value, [0, 1], [1.07, 0.95]) },
+    ],
+  }));
+
   const retryLoad = () => {
     triggerLight();
     setReloadToken((value) => value + 1);
@@ -940,7 +959,7 @@ function QuizzesExperience({ onBack }: { onBack: () => void }) {
       option0Y.value = 0;
       option1Y.value = 0;
       option2Y.value = 0;
-      retainedY.value = 0;
+      retainedX.value = 0;
     };
     transitionX.value = withTiming(-420, { duration: 260 }, (finished) => {
       if (!finished) return;
@@ -973,15 +992,15 @@ function QuizzesExperience({ onBack }: { onBack: () => void }) {
   const retainedGesture = Gesture.Pan()
     .enabled(showFact && !saving)
     .onUpdate((event) => {
-      if (event.translationY > 0) retainedY.value = event.translationY;
+      if (event.translationX > 0) retainedX.value = event.translationX;
     })
     .onEnd(() => {
-      if (retainedY.value > 55) {
-        retainedY.value = withTiming(90, { duration: 180 });
+      if (retainedX.value > 70) {
+        retainedX.value = withTiming(140, { duration: 180 });
         runOnJS(commitRetention)();
         return;
       }
-      retainedY.value = withSpring(0);
+      retainedX.value = withSpring(0);
     });
 
   const exitGesture = Gesture.Pan()
@@ -1000,9 +1019,11 @@ function QuizzesExperience({ onBack }: { onBack: () => void }) {
   const recallStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: recallY.value }],
   }));
-  const waveStyle = useAnimatedStyle(() => ({ opacity: waveOpacity.value }));
+  const waveStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(waveOpacity.value, [0, 1], [0, 0.2]),
+  }));
   const retainedStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: retainedY.value }],
+    transform: [{ translateX: retainedX.value }],
   }));
   const option0Style = useAnimatedStyle(() => ({
     transform: [{ translateY: option0Y.value }],
@@ -1053,19 +1074,7 @@ function QuizzesExperience({ onBack }: { onBack: () => void }) {
         </View>
       )}
 
-      {!loading && loadFailed && (
-        <View style={styles.quizEmptyLayer}>
-          <Text style={styles.quizTitle}>curiosity quizzes.</Text>
-          <Text style={styles.quizSubtitle}>
-            couldn't reach your discovery ledger.
-          </Text>
-          <Pressable onPress={retryLoad} hitSlop={12}>
-            <Text style={styles.quizRetryText}>tap to retry</Text>
-          </Pressable>
-        </View>
-      )}
-
-      {!loading && !loadFailed && !currentItem && (
+      {!loading && !currentItem && (
         <View style={styles.quizEmptyLayer}>
           <Text style={styles.quizTitle}>curiosity quizzes.</Text>
           <Text style={styles.quizSubtitle}>
@@ -1078,27 +1087,20 @@ function QuizzesExperience({ onBack }: { onBack: () => void }) {
         </View>
       )}
 
-      {!loading && !loadFailed && currentItem && stage === "lobby" && (
+      {!loading && currentItem && stage === "lobby" && (
         <View style={styles.quizLobbyLayer}>
           <Text style={styles.quizTitle}>curiosity quizzes.</Text>
           <Text style={styles.quizSubtitle}>
             {remaining} discoveries waiting for recall
           </Text>
-          <Animated.View style={[styles.quizSandPool, poolStyle]}>
-            <LinearGradient
-              colors={[
-                "rgba(214,178,120,0.15)",
-                "rgba(214,178,120,0.55)",
-                "rgba(176,132,82,0.7)",
-              ]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 0, y: 1 }}
-              style={StyleSheet.absoluteFillObject}
-            />
-          </Animated.View>
+
+          <View style={styles.quizSandPoolWrap} pointerEvents="none">
+            <Animated.View style={[styles.quizSandPoolGlow, poolStyle]} />
+          </View>
+
           <GestureDetector gesture={recallGesture}>
             <Animated.Text style={[styles.quizRecallText, recallStyle]}>
-              drag to recall
+              ↓ drag to recall
             </Animated.Text>
           </GestureDetector>
         </View>
@@ -1106,23 +1108,7 @@ function QuizzesExperience({ onBack }: { onBack: () => void }) {
 
       {!loading && currentItem && stage !== "lobby" && (
         <View style={styles.quizQuestionLayer}>
-          {currentItem.capturedAssetUri ? (
-            <Image
-              source={{ uri: currentItem.capturedAssetUri }}
-              style={StyleSheet.absoluteFillObject}
-              blurRadius={stage === "question" ? 22 : 0}
-            />
-          ) : (
-            <View style={styles.quizImageFallback} />
-          )}
-          {stage === "question" && (
-            <BlurView
-              intensity={55}
-              tint="light"
-              style={StyleSheet.absoluteFillObject}
-            />
-          )}
-          <View style={styles.quizScrim} pointerEvents="none" />
+          <View style={styles.quizCharcoalBg} pointerEvents="none" />
 
           <Animated.View
             pointerEvents="none"
@@ -1136,26 +1122,30 @@ function QuizzesExperience({ onBack }: { onBack: () => void }) {
           {stage === "question" && (
             <View style={styles.quizQuestionContent}>
               <Text style={styles.quizPrompt}>{currentItem.prompt}</Text>
+
               <View style={styles.quizTruthWrap}>
-                <Animated.View
-                  pointerEvents="none"
-                  style={[styles.quizTruthGlow, truthGlowStyle]}
-                >
+                <View pointerEvents="none" style={styles.quizTruthGlow}>
                   <LinearGradient
                     colors={[
-                      "rgba(22,163,74,0.55)",
-                      "rgba(22,163,74,0.12)",
-                      "rgba(22,163,74,0)",
+                      "rgba(59,130,246,0.75)",
+                      "rgba(59,130,246,0.25)",
+                      "rgba(59,130,246,0)",
                     ]}
                     style={StyleSheet.absoluteFillObject}
                   />
-                </Animated.View>
+                </View>
                 <View style={styles.quizTruthCircle}>
+                  <BlurView
+                    intensity={40}
+                    tint="dark"
+                    style={StyleSheet.absoluteFillObject}
+                  />
                   <Text style={styles.quizTruthCircleText}>
                     drag truth here
                   </Text>
                 </View>
               </View>
+
               <View style={styles.quizOptionsList}>
                 {currentItem.options.map((option, optionIndex) => (
                   <GestureDetector
@@ -1177,12 +1167,16 @@ function QuizzesExperience({ onBack }: { onBack: () => void }) {
             <View style={styles.quizFactLayer}>
               <Text style={styles.quizFactText}>{currentItem.fact}</Text>
               <View style={styles.retentionRow}>
-                <Text style={styles.retainedOutline}>RETAINED</Text>
-                <GestureDetector gesture={retainedGesture}>
-                  <Animated.Text style={[styles.retainedActive, retainedStyle]}>
-                    {saving ? "saving..." : "retained"}
-                  </Animated.Text>
-                </GestureDetector>
+                <Text style={styles.retainedHint}>drag right to retain</Text>
+                <View style={styles.retainedTrack}>
+                  <GestureDetector gesture={retainedGesture}>
+                    <Animated.Text
+                      style={[styles.retainedActive, retainedStyle]}
+                    >
+                      {saving ? "saving..." : "retained"}
+                    </Animated.Text>
+                  </GestureDetector>
+                </View>
               </View>
             </View>
           )}
@@ -1519,7 +1513,7 @@ const styles = StyleSheet.create({
   quizRoot: { flex: 1, backgroundColor: "#0a0a0a" },
   quizNavRow: {
     position: "absolute",
-    top: 128,
+    top: 120,
     left: 22,
     flexDirection: "row",
     alignItems: "center",
@@ -1531,7 +1525,7 @@ const styles = StyleSheet.create({
   quizLobbyLayer: {
     flex: 1,
     paddingHorizontal: 28,
-    paddingTop: 210,
+    paddingTop: 230,
   },
   quizLoadingLayer: {
     flex: 1,
@@ -1543,7 +1537,7 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "center",
     paddingHorizontal: 28,
-    paddingBottom: 60,
+    paddingTop: 86,
   },
   quizLoadingText: {
     color: "rgba(255,255,255,0.6)",
@@ -1563,6 +1557,14 @@ const styles = StyleSheet.create({
     marginTop: 10,
     marginBottom: 24,
   },
+  quizSandPoolGlow: {
+    position: "absolute",
+    bottom: -160,
+    width: 420,
+    height: 420,
+    borderRadius: 210,
+    backgroundColor: "rgba(59,130,246,0.35)",
+  },
   quizEmptyHint: {
     color: "rgba(226,232,240,0.5)",
     fontSize: 13,
@@ -1579,80 +1581,90 @@ const styles = StyleSheet.create({
   },
   quizSandPool: {
     position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: "32%",
-    borderTopLeftRadius: 46,
-    borderTopRightRadius: 46,
+    bottom: "0",
+    left: "0",
+    right: "0",
+    height: "40%",
+    alignItems: "center",
+    justifyContent: "flex-end",
     overflow: "hidden",
   },
   quizRecallText: {
     position: "absolute",
-    bottom: "42%",
+    bottom: "40%",
     left: 0,
     right: 0,
     textAlign: "center",
     color: "rgba(226,232,240,0.85)",
-    fontSize: 16,
-    fontWeight: "700",
-    textTransform: "lowercase",
-    letterSpacing: 0.5,
+    fontSize: 15,
+    fontWeight: "800",
+    textTransform: "uppercase",
+    letterSpacing: 1,
   },
   quizQuestionLayer: { flex: 1 },
-  quizImageFallback: { flex: 1, backgroundColor: "#e5e5e0" },
-  quizScrim: {
+  quizCharcoalBg: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(250,250,247,0.88)",
+    backgroundColor: "#0a0a0a",
   },
   quizWave: { ...StyleSheet.absoluteFillObject },
+
+  quizSynthesisCanvas: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "#f5f4ed",
+    zIndex: 1,
+  },
   quizQuestionContent: {
     flex: 1,
     paddingHorizontal: 26,
     paddingTop: 140,
+    zIndex: 2,
   },
   quizPrompt: {
-    color: "#0a0a0a",
+    color: "#fff",
     fontSize: 34,
     lineHeight: 40,
     fontWeight: "900",
     letterSpacing: -1,
     textAlign: "center",
-    marginBottom: 30,
+    marginBottom: 40,
   },
   quizTruthWrap: {
     alignSelf: "center",
-    width: 150,
-    height: 150,
+    width: 170,
+    height: 170,
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 30,
+    marginBottom: 40,
   },
   quizTruthGlow: {
     position: "absolute",
-    width: 210,
-    height: 210,
-    borderRadius: 105,
+    width: 260,
+    height: 260,
+    borderRadius: 130,
+    overflow: "hidden",
+    opacity: 0.85,
   },
   quizTruthCircle: {
-    width: 150,
-    height: 150,
-    borderRadius: 75,
+    width: 170,
+    height: 170,
+    borderRadius: 85,
     borderWidth: 1,
-    borderColor: "rgba(10,10,10,0.28)",
-    backgroundColor: "rgba(250,250,247,0.6)",
+    borderColor: "rgba(96,165,250,0.5)",
+    backgroundColor: "rgba(59,130,246,0.12)",
     alignItems: "center",
     justifyContent: "center",
+    overflow: "hidden",
   },
   quizTruthCircleText: {
-    color: "rgba(10,10,10,0.5)",
+    color: "rgba(219,234,254,0.9)",
     fontSize: 12,
     fontWeight: "700",
-    textTransform: "lowercase",
+    textTransform: "uppercase",
+    letterSpacing: 1,
   },
-  quizOptionsList: { gap: 22 },
+  quizOptionsList: { gap: 24 },
   quizOptionText: {
-    color: "#0a0a0a",
+    color: "rgba(241,245,249,0.92)",
     fontSize: 17,
     fontWeight: "600",
     textAlign: "left",
@@ -1662,9 +1674,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 30,
+    zIndex: 2,
   },
   quizFactText: {
-    color: "#0a0a0a",
+    color: "#fff",
     fontSize: 24,
     lineHeight: 32,
     fontWeight: "800",
@@ -1672,19 +1685,24 @@ const styles = StyleSheet.create({
     marginBottom: 50,
   },
   retentionRow: { alignItems: "center" },
-  retainedOutline: {
-    color: "rgba(10,10,10,0.28)",
-    fontSize: 13,
-    fontWeight: "800",
-    letterSpacing: 1.5,
+  retainedHint: {
+    color: "rgba(255,255,255,0.5)",
+    fontSize: 12,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 1.2,
+    marginBottom: 14,
+  },
+  retainedTrack: {
+    width: 220,
+    height: 44,
+    justifyContent: "center",
   },
   retainedActive: {
-    position: "absolute",
     color: "#16a34a",
     fontSize: 16,
     fontWeight: "800",
     textTransform: "lowercase",
-    top: -30,
   },
   quizError: {
     color: "#fecaca",
