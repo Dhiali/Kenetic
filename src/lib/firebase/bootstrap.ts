@@ -15,10 +15,12 @@ import {
 import {
     abandonSession,
     completeSession,
+    createBreatheExerciseLaunch,
     createDashboardSelection,
     createFocusFeatureLaunch,
     createUserProfile,
     deleteUserData,
+    getBreatheDashboardMetrics,
     getFocusDashboardMetrics,
     getUserProfile,
     markOnboardingComplete,
@@ -272,6 +274,18 @@ export async function loadFocusDashboardMetrics() {
   return getFocusDashboardMetrics(user.uid);
 }
 
+export async function loadBreatheDashboardMetrics() {
+  const user = await ensureAnonymousUser();
+  return getBreatheDashboardMetrics(user.uid);
+}
+
+export async function persistBreatheExerciseLaunch(
+  exercise: "calm-down" | "recenter" | "clear-mind" | "deep-relax",
+) {
+  const user = await ensureAnonymousUser();
+  await createBreatheExerciseLaunch(user.uid, exercise);
+}
+
 export async function persistFocusFeatureLaunch(
   feature: "get-shit-done" | "alien-mode",
 ) {
@@ -309,6 +323,44 @@ export async function finishAlienModeSession(
     await abandonSession(user.uid, sessionId, {
       mode: "alien-mode",
       reason: "user-left-session",
+    });
+  }
+}
+
+export async function startBreatheSession(
+  exercise: "calm-down" | "recenter" | "clear-mind" | "deep-relax",
+  durationSeconds: number,
+) {
+  const user = await ensureAnonymousUser();
+  const session = await startSession(user.uid, "breathe", {
+    mode: "guided-breathe",
+    exercise,
+    plannedDurationSeconds: durationSeconds,
+  });
+  return session.id;
+}
+
+export async function finishBreatheSession(
+  sessionId: string,
+  durationSeconds: number,
+  completed: boolean,
+  exercise: string,
+  interruptionCount = 0,
+) {
+  const user = await ensureAnonymousUser();
+  if (completed) {
+    await completeSession(user.uid, sessionId, durationSeconds, {
+      mode: "guided-breathe",
+      exercise,
+      completionReason: "exercise-finished",
+      interruptionCount,
+    });
+  } else {
+    await abandonSession(user.uid, sessionId, {
+      mode: "guided-breathe",
+      exercise,
+      reason: "user-left-exercise",
+      interruptionCount,
     });
   }
 }

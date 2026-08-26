@@ -239,6 +239,16 @@ service cloud.firestore {
           && request.resource.data.launchedAt is timestamp;
         allow update: if false;
       }
+
+      match /breatheExerciseLaunches/{launchId} {
+        allow read, delete: if ownsUser(userId);
+        allow create: if ownsUser(userId)
+          && request.resource.data.keys().hasAll(['exercise', 'source', 'launchedAt'])
+          && request.resource.data.exercise in ['calm-down', 'recenter', 'clear-mind', 'deep-relax']
+          && request.resource.data.source == 'breathe-dashboard'
+          && request.resource.data.launchedAt is timestamp;
+        allow update: if false;
+      }
     }
   }
 }

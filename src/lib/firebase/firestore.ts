@@ -115,6 +115,12 @@ export type FocusFeatureLaunchRecord = {
   launchedAt: unknown;
 };
 
+export type BreatheExerciseLaunchRecord = {
+  exercise: "calm-down" | "recenter" | "clear-mind" | "deep-relax";
+  source: "breathe-dashboard";
+  launchedAt: unknown;
+};
+
 export function userReference(uid: string): DocumentReference<UserProfile> {
   return doc(firestore, "users", uid) as DocumentReference<UserProfile>;
 }
@@ -238,6 +244,19 @@ export const dashboardSelectionsCollection = (uid: string) =>
   userCollection<DashboardSelectionRecord>(uid, "dashboardSelections");
 export const focusFeatureLaunchesCollection = (uid: string) =>
   userCollection<FocusFeatureLaunchRecord>(uid, "focusFeatureLaunches");
+export const breatheExerciseLaunchesCollection = (uid: string) =>
+  userCollection<BreatheExerciseLaunchRecord>(uid, "breatheExerciseLaunches");
+
+export function createBreatheExerciseLaunch(
+  uid: string,
+  exercise: BreatheExerciseLaunchRecord["exercise"],
+) {
+  return addDoc(breatheExerciseLaunchesCollection(uid), {
+    exercise,
+    source: "breathe-dashboard",
+    launchedAt: serverTimestamp(),
+  });
+}
 
 export function createFocusFeatureLaunch(
   uid: string,
@@ -359,6 +378,42 @@ export async function getFocusDashboardMetrics(uid: string) {
     getShitDoneMinutes: Math.round(minutesFor(getShitDoneSessions)),
     alienModeMinutes: Math.round(minutesFor(alienModeSessions)),
     totalFocusMinutes: Math.round(minutesFor(completedFocusSessions)),
+  };
+}
+
+export async function getBreatheDashboardMetrics(uid: string) {
+  const snapshot = await getDocs(sessionsCollection(uid));
+  const sessions = snapshot.docs
+    .map((session) => session.data())
+    .filter(
+      (session) =>
+        session.type === "breathe" &&
+        session.metadata?.mode === "guided-breathe",
+    );
+  const now = new Date();
+  const weekStart = new Date(now);
+  const daysSinceMonday = (now.getDay() + 6) % 7;
+  weekStart.setDate(now.getDate() - daysSinceMonday);
+  weekStart.setHours(0, 0, 0, 0);
+  const startedThisWeek = sessions.filter((session) => {
+    const timestamp = session.startedAt as { toMillis?: () => number };
+    return typeof timestamp?.toMillis === "function"
+      ? timestamp.toMillis() >= weekStart.getTime()
+      : true;
+  });
+  const completed = startedThisWeek.filter(
+    (session) => session.status === "completed",
+  );
+  const totalSeconds = completed.reduce(
+    (total, session) => total + (session.durationSeconds ?? 0),
+    0,
+  );
+  return {
+    completedSessions: completed.length,
+    restorationMinutes: Math.round(totalSeconds / 60),
+    recoveryIndex: startedThisWeek.length
+      ? Math.round((completed.length / startedThisWeek.length) * 100)
+      : 0,
   };
 }
 

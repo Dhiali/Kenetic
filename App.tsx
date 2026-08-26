@@ -10,6 +10,7 @@ import {
 } from "./src/lib/firebase/bootstrap";
 import AlienModeScreen from "./src/screens/AlienModeScreen";
 import BreatheDashboard from "./src/screens/BreatheDashboard";
+import BreatheExerciseScreen from "./src/screens/BreatheExerciseScreen";
 import Dashboard from "./src/screens/Dashboard";
 import FocusDashboard from "./src/screens/FocusDashboard";
 import GsdSetupScreen from "./src/screens/GsdSetupScreen";
@@ -152,13 +153,47 @@ export default function App() {
         return (
           <BreatheDashboard
             onBack={() => goTo("DASHBOARD")}
-            onCalm={() => goTo("BREATHE_SETUP")}
-            onRecenter={() => goTo("BREATHE_SETUP")}
-            onClearMind={() => goTo("BREATHE_SETUP")}
-            onDeepRelax={() => goTo("BREATHE_SETUP")}
+            onCalm={() => goTo("BREATHE_CALM")}
+            onRecenter={() => goTo("BREATHE_RECENTER")}
+            onClearMind={() => goTo("BREATHE_CLEAR_MIND")}
+            onDeepRelax={() => goTo("BREATHE_DEEP_RELAX")}
           />
         );
       case "BREATHE_SETUP":
+        return (
+          <BreatheExerciseScreen
+            exercise="calm-down"
+            onBack={() => goTo("BREATHE_DASHBOARD")}
+          />
+        );
+      case "BREATHE_CALM":
+        return (
+          <BreatheExerciseScreen
+            exercise="calm-down"
+            onBack={() => goTo("BREATHE_DASHBOARD")}
+          />
+        );
+      case "BREATHE_RECENTER":
+        return (
+          <BreatheExerciseScreen
+            exercise="recenter"
+            onBack={() => goTo("BREATHE_DASHBOARD")}
+          />
+        );
+      case "BREATHE_CLEAR_MIND":
+        return (
+          <BreatheExerciseScreen
+            exercise="clear-mind"
+            onBack={() => goTo("BREATHE_DASHBOARD")}
+          />
+        );
+      case "BREATHE_DEEP_RELAX":
+        return (
+          <BreatheExerciseScreen
+            exercise="deep-relax"
+            onBack={() => goTo("BREATHE_DASHBOARD")}
+          />
+        );
       case "BREATHE_EXERCISE":
       case "BREATHE_RITUAL":
         return <ComingSoon label="breathe." onBack={() => goTo("DASHBOARD")} />;

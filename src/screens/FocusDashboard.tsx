@@ -87,7 +87,7 @@ export default function FocusDashboard({
     });
 
   const launchFeature = async (
-    feature: "get-shit-done" | "alien-mode",
+    feature: "Get-shit-done" | "Alien-mode",
     action: () => void,
   ) => {
     setLaunchError(null);
@@ -137,11 +137,11 @@ export default function FocusDashboard({
       >
         <GestureDetector gesture={exitGesture}>
           <View style={styles.nav}>
-            <Text style={styles.back}>← dashboard </Text>
+            <Text style={styles.back}>← Dashboard </Text>
             <Text style={styles.hint}>(drag right to exit focus state)</Text>
           </View>
         </GestureDetector>
-        <Text style={styles.title}>focus state.</Text>
+        <Text style={styles.title}>Focus state.</Text>
         <View style={styles.metrics}>
           <Metric
             value={`${metrics.completedSessions}`}
@@ -171,13 +171,13 @@ export default function FocusDashboard({
         {launchError && <Text style={styles.error}>{launchError}</Text>}
         <View style={styles.gateways}>
           <Gateway
-            title="get shit done."
+            title="Get shit done."
             label="sound tether & app lock"
             description="Connects Apple Music or Spotify. Activates background audio and automatically pauses playback if you stay actively on your phone for more than 2 minutes."
             onLaunch={() => void launchFeature("get-shit-done", onGetShitDone)}
           />
           <Gateway
-            title="alien mode."
+            title="Alien mode."
             label="ai task deconstructor"
             description={
               'Intercepts overwhelming tasks and prompts you with a "Beginner\'s Mind" question to reframe your perspective before the timer begins.'

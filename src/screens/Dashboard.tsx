@@ -328,19 +328,19 @@ export default function DashboardScreen({
         <View style={styles.menuContainer} pointerEvents="box-none">
           <DraggableMenuItem
             id="focus"
-            label="focus"
+            label="Focus"
             color="#e11d48"
             action={onFocus}
           />
           <DraggableMenuItem
             id="outdoors"
-            label="outdoors"
+            label="Outdoors"
             color="#16a34a"
             action={onOutdoors}
           />
           <DraggableMenuItem
             id="breathe"
-            label="breathe"
+            label="Breathe"
             color="#f97316"
             action={onBreathe}
           />
@@ -349,7 +349,7 @@ export default function DashboardScreen({
         {/* Profile Anchor (Bottom Left) */}
         <GestureDetector gesture={profileGesture}>
           <Animated.Text style={[styles.profileText, profileStyle]}>
-            your profile. &rarr;
+            Your profile. &rarr;
           </Animated.Text>
         </GestureDetector>
       </View>
@@ -379,7 +379,7 @@ export default function DashboardScreen({
             style={styles.boundaryCard}
           >
             <Text style={styles.boundaryTitle}>
-              would you like push notifications from kenetic?
+              Would you like push notifications from kenetic?
             </Text>
 
             <Text style={styles.boundaryText}>

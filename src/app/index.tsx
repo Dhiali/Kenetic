@@ -11,6 +11,7 @@ import {
 } from "@/lib/firebase/bootstrap";
 import AlienModeScreen from "@/screens/AlienModeScreen";
 import BreatheDashboard from "@/screens/BreatheDashboard";
+import BreatheExerciseScreen from "@/screens/BreatheExerciseScreen";
 import DashboardScreen from "@/screens/Dashboard";
 import GsdSetupScreen from "@/screens/GsdSetupScreen";
 import IntakeCarousel from "@/screens/IntakeCarousel";
@@ -174,24 +175,42 @@ export default function Index() {
     return (
       <BreatheDashboard
         onBack={() => go("DASHBOARD")}
-        onCalm={() => go("BREATHE_SETUP")}
-        onRecenter={() => go("BREATHE_SETUP")}
-        onClearMind={() => go("BREATHE_SETUP")}
-        onDeepRelax={() => go("BREATHE_SETUP")}
+        onCalm={() => go("BREATHE_CALM")}
+        onRecenter={() => go("BREATHE_RECENTER")}
+        onClearMind={() => go("BREATHE_CLEAR_MIND")}
+        onDeepRelax={() => go("BREATHE_DEEP_RELAX")}
       />
     );
   if (screen === "BREATHE_SETUP")
     return (
-      <FeatureList
-        title="breathe practice."
-        accent="#f97316"
+      <BreatheExerciseScreen
+        exercise="calm-down"
         onBack={() => go("BREATHE")}
-        items={[
-          {
-            title: "guided breath",
-            description: "Your breathe feature will open here.",
-          },
-        ]}
+      />
+    );
+  if (screen === "BREATHE_CALM")
+    return (
+      <BreatheExerciseScreen
+        exercise="calm-down"
+        onBack={() => go("BREATHE")}
+      />
+    );
+  if (screen === "BREATHE_RECENTER")
+    return (
+      <BreatheExerciseScreen exercise="recenter" onBack={() => go("BREATHE")} />
+    );
+  if (screen === "BREATHE_CLEAR_MIND")
+    return (
+      <BreatheExerciseScreen
+        exercise="clear-mind"
+        onBack={() => go("BREATHE")}
+      />
+    );
+  if (screen === "BREATHE_DEEP_RELAX")
+    return (
+      <BreatheExerciseScreen
+        exercise="deep-relax"
+        onBack={() => go("BREATHE")}
       />
     );
   if (screen === "OUTDOORS")

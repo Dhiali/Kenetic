@@ -15,6 +15,11 @@ import Animated, {
     withSpring,
     withTiming,
 } from "react-native-reanimated";
+import {
+    loadBreatheDashboardMetrics,
+    persistBreatheExerciseLaunch,
+} from "../lib/firebase/bootstrap";
+import { firebaseErrorMessage } from "../lib/firebase/errors";
 
 type Props = {
   onBack: () => void;
@@ -31,10 +36,20 @@ export default function BreatheDashboard({
   onClearMind = () => undefined,
   onDeepRelax = () => undefined,
 }: Props) {
+  const [metrics, setMetrics] = React.useState({
+    completedSessions: 0,
+    restorationMinutes: 0,
+    recoveryIndex: 0,
+  });
+  const [launchError, setLaunchError] = React.useState<string | null>(null);
+  const [launching, setLaunching] = React.useState(false);
   const auraScale = useSharedValue(1);
   const auraMorph = useSharedValue(0);
   const exitX = useSharedValue(0);
   useEffect(() => {
+    void loadBreatheDashboardMetrics()
+      .then(setMetrics)
+      .catch(() => undefined);
     auraScale.value = withRepeat(
       withSequence(
         withTiming(1.08, { duration: 2600, easing: Easing.inOut(Easing.ease) }),
@@ -73,6 +88,23 @@ export default function BreatheDashboard({
   const screenStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: exitX.value }],
   }));
+
+  const launchExercise = async (
+    exercise: "calm-down" | "recenter" | "clear-mind" | "deep-relax",
+    action: () => void,
+  ) => {
+    if (launching) return;
+    setLaunching(true);
+    setLaunchError(null);
+    try {
+      await persistBreatheExerciseLaunch(exercise);
+      action();
+    } catch (error) {
+      setLaunchError(firebaseErrorMessage(error));
+    } finally {
+      setLaunching(false);
+    }
+  };
   return (
     <Animated.View
       style={[styles.screen, screenStyle]}
@@ -98,48 +130,58 @@ export default function BreatheDashboard({
       >
         <GestureDetector gesture={exitGesture}>
           <View style={styles.nav}>
-            <Text style={styles.back}>← dashboard </Text>
+            <Text style={styles.back}>← Dashboard </Text>
             <Text style={styles.hint}>(drag right to exit breathe state)</Text>
           </View>
         </GestureDetector>
-        <Text style={styles.title}>breathe state.</Text>
+        <Text style={styles.title}>Breathe state.</Text>
         <Text style={styles.manifesto}>
-          use breath to settle your body, clear your attention, and return to
+          Use breath to settle your body, clear your attention, and return to
           the present moment.
         </Text>
         <View style={styles.metrics}>
-          <Metric value="14" label="sessions completed this week" />
-          <Metric value="42m" label="total somatic restoration" />
-          <Metric value="94%" label="calm index / nervous system recovery" />
+          <Metric
+            value={`${metrics.completedSessions}`}
+            label="sessions completed this week"
+          />
+          <Metric
+            value={`${metrics.restorationMinutes}m`}
+            label="somatic restoration this week"
+          />
+          <Metric
+            value={`${metrics.recoveryIndex}%`}
+            label="calm index / nervous system recovery"
+          />
         </View>
+        {launchError && <Text style={styles.launchError}>{launchError}</Text>}
         <View style={styles.gateways}>
           <Gateway
             accent="#f97316"
-            title="calm down."
+            title="Calm down."
             label="physiological sigh (two quick inhales, long slow exhale)"
             description="Acute anxiety, racing heart rate, physical tension."
-            onLaunch={onCalm}
+            onLaunch={() => void launchExercise("calm-down", onCalm)}
           />
           <Gateway
             accent="#e11d48"
-            title="recenter."
+            title="Recenter."
             label="4-7-8 rhythmic grounding"
             description="Midday distraction, emotional turbulence, task switching."
-            onLaunch={onRecenter}
+            onLaunch={() => void launchExercise("recenter", onRecenter)}
           />
           <Gateway
             accent="#16a34a"
-            title="clear mind."
+            title="Clear mind."
             label="4-4-4-4 box breathing"
             description="Brain fog, mental overload, pre-focus preparation."
-            onLaunch={onClearMind}
+            onLaunch={() => void launchExercise("clear-mind", onClearMind)}
           />
           <Gateway
             accent="#d6c3a5"
-            title="deep relax."
+            title="Deep relax."
             label="non-sleep deep rest (NSDR) / somatic body scan"
             description="Sleep preparation, post-work shutdown, severe fatigue."
-            onLaunch={onDeepRelax}
+            onLaunch={() => void launchExercise("deep-relax", onDeepRelax)}
           />
         </View>
       </ScrollView>
@@ -246,6 +288,12 @@ const styles = StyleSheet.create({
     marginBottom: 32,
   },
   metrics: { gap: 18, marginBottom: 64 },
+  launchError: {
+    color: "#fca5a5",
+    fontSize: 12,
+    lineHeight: 18,
+    marginBottom: 18,
+  },
   metric: { flexDirection: "row", alignItems: "baseline", gap: 14 },
   metricValue: {
     color: "#fff",
