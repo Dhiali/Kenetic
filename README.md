@@ -1,6 +1,6 @@
 # kenetic
 
-![kenetic app icon](assets/images/icon.png)
+![kenetic app icon](assets/images/keneticicon.jpg)
 
 kenetic is a mobile wellbeing and environmental-awareness app built around
 small physical actions. It helps users move between focused work, breathing
