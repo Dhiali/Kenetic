@@ -14,7 +14,7 @@ works without an AI API or a paid AI backend.
 
 ## Demo
 
-Demo video: **[Google Drive demo link will be added here](https://drive.google.com/)**
+Demo video: **[Google Drive demo link](https://drive.google.com/file/d/1YRzw8xiRb9WkZUY4YqnlT9OEe4CRp3Xo/view?usp=sharing)**
 
 ## Product Overview
 
