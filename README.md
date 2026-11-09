@@ -433,4 +433,14 @@ are not fully represented in a web browser.
 
 ## License
 
-See [LICENSE](LICENSE).
+All rights reserved.
+
+## Acknowledgments
+
+Thanks to Tsungai Katsuro, William Basson, AI tools including Google Gemini
+and ChatGPT, and the Stack Overflow community for their support and
+contributions.
+
+## Author
+
+[Dhiali](https://github.com/Dhiali)
