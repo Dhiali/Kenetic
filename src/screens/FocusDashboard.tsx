@@ -1,8 +1,9 @@
 import { BlurView } from "expo-blur";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
-import React, { useEffect } from "react";
+import React, { useEffect, useRef } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
+import SwipeAction from "../components/SwipeAction";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
     Easing,
@@ -47,14 +48,31 @@ export default function FocusDashboard({
     totalFocusMinutes: 0,
   });
   const [launchError, setLaunchError] = React.useState<string | null>(null);
+  const [metricsError, setMetricsError] = React.useState(false);
+  const [metricsLoaded, setMetricsLoaded] = React.useState(false);
+  const [reloadToken, setReloadToken] = React.useState(0);
+  const launchInProgress = useRef(false);
   const auraScale = useSharedValue(1);
   const auraMorph = useSharedValue(0);
   const exitX = useSharedValue(0);
 
   useEffect(() => {
+    let active = true;
+    setMetricsLoaded(false);
+    setMetricsError(false);
     void loadFocusDashboardMetrics()
-      .then(setMetrics)
-      .catch(() => undefined);
+      .then((result) => {
+        if (!active) return;
+        setMetrics(result);
+        setMetricsLoaded(true);
+      })
+      .catch(() => {
+        if (active) setMetricsError(true);
+      });
+    return () => { active = false; };
+  }, [reloadToken]);
+
+  useEffect(() => {
     auraScale.value = withRepeat(
       withSequence(
         withTiming(1.08, { duration: 2600, easing: Easing.inOut(Easing.ease) }),
@@ -87,15 +105,19 @@ export default function FocusDashboard({
     });
 
   const launchFeature = async (
-    feature: "Get-shit-done" | "Alien-mode",
+    feature: "get-shit-done" | "alien-mode",
     action: () => void,
   ) => {
+    if (launchInProgress.current) return;
+    launchInProgress.current = true;
     setLaunchError(null);
     try {
       await persistFocusFeatureLaunch(feature);
       action();
     } catch (error) {
       setLaunchError(firebaseErrorMessage(error));
+    } finally {
+      launchInProgress.current = false;
     }
   };
 
@@ -117,18 +139,18 @@ export default function FocusDashboard({
       style={[styles.screen, screenStyle]}
       entering={FadeIn.duration(500)}
     >
-      <Animated.View style={[styles.aura, auraStyle]}>
+      <Animated.View pointerEvents="none" style={[styles.aura, auraStyle]}>
         <LinearGradient
           colors={["#b3133b", "#e11d48", "rgba(225,29,72,0)"]}
           locations={[0, 0.48, 1]}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
-          style={StyleSheet.absoluteFillObject}
+          style={StyleSheet.absoluteFill}
         />
         <BlurView
           intensity={70}
           tint="dark"
-          style={StyleSheet.absoluteFillObject}
+          style={StyleSheet.absoluteFill}
         />
       </Animated.View>
       <ScrollView
@@ -137,12 +159,30 @@ export default function FocusDashboard({
       >
         <GestureDetector gesture={exitGesture}>
           <View style={styles.nav}>
-            <Text style={styles.back}>← Dashboard </Text>
+            <Text style={styles.back}>Dashboard → </Text>
             <Text style={styles.hint}>(drag right to exit focus state)</Text>
           </View>
         </GestureDetector>
         <Text style={styles.title}>Focus state.</Text>
-        <View style={styles.metrics}>
+        <Text style={styles.intro}>Choose how you want to focus today.</Text>
+        {launchError && <Text style={styles.error}>{launchError}</Text>}
+        <View style={styles.gateways}>
+          <Gateway
+            title="Get shit done."
+            label="music & focus timer"
+            description="Open Apple Music or Spotify to choose your sound. Your focus timer starts when you return to Kenetic."
+            onLaunch={() => void launchFeature("get-shit-done", onGetShitDone)}
+          />
+          <Gateway
+            title="Alien mode."
+            label="AI task breakdown"
+            description="Turns an overwhelming task into small suggested steps with your consent."
+            onLaunch={() => void launchFeature("alien-mode", onAlienMode)}
+          />
+        </View>
+        <Text style={styles.statsHeading}>YOUR FOCUS ACTIVITY</Text>
+        {!metricsLoaded && !metricsError && <Text style={styles.loading}>Loading your activity...</Text>}
+        {metricsLoaded && <View style={styles.metrics}>
           <Metric
             value={`${metrics.completedSessions}`}
             label="completed sessions"
@@ -165,26 +205,12 @@ export default function FocusDashboard({
           />
           <Metric
             value={`${metrics.handoffCompletedSessions}`}
-            label="two-minute handoffs completed"
+            label="music handoffs completed"
           />
-        </View>
-        {launchError && <Text style={styles.error}>{launchError}</Text>}
-        <View style={styles.gateways}>
-          <Gateway
-            title="Get shit done."
-            label="sound tether & app lock"
-            description="Connects Apple Music or Spotify. Activates background audio and automatically pauses playback if you stay actively on your phone for more than 2 minutes."
-            onLaunch={() => void launchFeature("get-shit-done", onGetShitDone)}
-          />
-          <Gateway
-            title="Alien mode."
-            label="ai task deconstructor"
-            description={
-              'Intercepts overwhelming tasks and prompts you with a "Beginner\'s Mind" question to reframe your perspective before the timer begins.'
-            }
-            onLaunch={() => void launchFeature("alien-mode", onAlienMode)}
-          />
-        </View>
+        </View>}
+        {metricsError && (
+          <SwipeAction label="Focus statistics unavailable. Retry" onActivate={() => setReloadToken((value) => value + 1)} />
+        )}
       </ScrollView>
     </Animated.View>
   );
@@ -210,29 +236,42 @@ function Gateway({
   description: string;
   onLaunch: () => void;
 }) {
-  const y = useSharedValue(0);
+  const x = useSharedValue(0);
   const active = useSharedValue(false);
   const gesture = Gesture.Pan()
+    .activeOffsetX([-12, 12])
+    .failOffsetY([-15, 15])
     .onStart(() => {
       active.value = true;
       runOnJS(triggerFocusImpact)();
     })
     .onUpdate((event) => {
-      y.value = Math.min(0, event.translationY);
+      x.value = Math.max(-100, Math.min(0, event.translationX));
     })
     .onEnd((event) => {
       active.value = false;
       if (event.translationX < -80) {
         runOnJS(onLaunch)();
       }
-      y.value = withSpring(0, { damping: 16, stiffness: 180 });
+      x.value = withSpring(0, { damping: 16, stiffness: 180 });
     });
   const style = useAnimatedStyle(() => ({
-    transform: [{ translateY: y.value }, { scale: active.value ? 1.03 : 1 }],
+    transform: [{ translateX: x.value }, { scale: active.value ? 1.02 : 1 }],
   }));
   return (
     <GestureDetector gesture={gesture}>
-      <Animated.View style={[styles.gateway, style]}>
+      <Animated.View
+        accessible
+        accessibilityRole="adjustable"
+        accessibilityLabel={`Open ${title}`}
+        accessibilityHint="Swipe left or activate to open."
+        accessibilityActions={[{ name: "activate", label: `Open ${title}` }]}
+        onAccessibilityAction={(event) => {
+          if (event.nativeEvent.actionName === "activate") onLaunch();
+        }}
+        onAccessibilityTap={onLaunch}
+        style={[styles.gateway, style]}
+      >
         <Text style={styles.gatewayTitle}>{title}</Text>
         <Text style={styles.gatewayLabel}>{label}</Text>
         <Text style={styles.gatewayDescription}>{description}</Text>
@@ -258,43 +297,44 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 14 },
     elevation: 18,
   },
-  content: { padding: 28, paddingTop: 48, paddingBottom: 48 },
+  content: { padding: 28, paddingTop: 104, paddingBottom: 72 },
   nav: {
     flexDirection: "row",
     alignItems: "center",
     paddingVertical: 12,
-    marginTop: 60,
-    marginBottom: 24,
+    marginBottom: 32,
   },
-  back: { color: "#e11d48", fontSize: 15, fontWeight: "700" },
-  hint: { color: "rgba(255,255,255,0.35)", fontSize: 13, fontWeight: "500" },
+  back: { color: "#ff9aaa", fontSize: 15, fontWeight: "700" },
+  hint: { color: "#c5b6ba", fontSize: 12, fontWeight: "500", flexShrink: 1 },
   title: {
     color: "#fff",
     fontSize: 52,
     lineHeight: 54,
     fontWeight: "900",
     letterSpacing: -2,
-    marginBottom: 36,
+    marginBottom: 10,
   },
-  metrics: { gap: 18, marginBottom: 64 },
-  metric: { flexDirection: "row", alignItems: "baseline", gap: 14 },
+  intro: { color: "#ded0d3", fontSize: 16, lineHeight: 24, marginBottom: 30 },
+  statsHeading: { color: "#ff9aaa", fontSize: 11, letterSpacing: 1.6, fontWeight: "800", marginTop: 42, marginBottom: 18 },
+  loading: { color: "#d0c4c6", fontSize: 14 },
+  metrics: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  metric: { width: "48%", flexGrow: 1, backgroundColor: "#191417", borderRadius: 16, padding: 15, minHeight: 95 },
   metricValue: {
     color: "#fff",
-    fontSize: 48,
+    fontSize: 30,
     fontWeight: "900",
     letterSpacing: -2,
-    minWidth: 110,
   },
   metricLabel: {
-    color: "rgba(255,255,255,0.45)",
+    color: "#c8bdc0",
     fontSize: 11,
     fontWeight: "700",
     letterSpacing: 1.3,
     textTransform: "uppercase",
     flexShrink: 1,
   },
-  gateways: { gap: 40 },
-  gateway: { borderTopWidth: 1, borderTopColor: "#242424", paddingTop: 24 },
+  gateways: { gap: 14 },
+  gateway: { borderWidth: 1, borderColor: "#6d3342", borderRadius: 24, backgroundColor: "#23151a", padding: 22 },
   gatewayTitle: {
     color: "#fff",
     fontSize: 36,
@@ -303,7 +343,7 @@ const styles = StyleSheet.create({
     letterSpacing: -1.5,
   },
   gatewayLabel: {
-    color: "#e11d48",
+    color: "#ff9aaa",
     fontSize: 12,
     fontWeight: "800",
     letterSpacing: 1.4,
@@ -311,13 +351,13 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
   gatewayDescription: {
-    color: "rgba(255,255,255,0.55)",
+    color: "#dfd2d5",
     fontSize: 15,
     lineHeight: 23,
     marginTop: 12,
   },
   gatewayHint: {
-    color: "#e11d48",
+    color: "#ff9aaa",
     fontSize: 12,
     fontWeight: "800",
     letterSpacing: 1.2,

@@ -1,8 +1,9 @@
 import { StatusBar } from "expo-status-bar";
-import React, { useRef, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
+import SwipeAction from "./src/components/SwipeAction";
 import {
     persistOnboardingCompletion,
     registerUserAccount,
@@ -25,6 +26,7 @@ import SplashScreen from "./src/screens/SplashScreen";
 import TheFork from "./src/screens/TheFork";
 import { colors } from "./src/theme/colors";
 import { ScreenState } from "./src/types";
+import { firebaseErrorMessage } from "./src/lib/firebase/errors";
 
 // Screens below are not yet ported in this phase — placeholder keeps
 // the navigation graph intact and the app runnable end to end.
@@ -35,32 +37,42 @@ function ComingSoon({ label, onBack }: { label: string; onBack: () => void }) {
       <Text style={styles.comingSoonSub}>
         not ported yet — next build phase
       </Text>
-      <Pressable onPress={onBack} style={{ marginTop: 32 }}>
-        <Text style={styles.comingSoonBack}>&larr; back to dashboard</Text>
-      </Pressable>
+      <SwipeAction label="back to dashboard" onActivate={onBack} />
     </View>
   );
 }
 
 export default function App() {
   const [currentScreen, setCurrentScreen] = useState<ScreenState>("SPLASH");
-  const [showNotificationPrompt, setShowNotificationPrompt] = useState(false);
-  const restoredAccount = useRef(false);
+  const [splashFinished, setSplashFinished] = useState(false);
+  const [startupResult, setStartupResult] = useState<Awaited<ReturnType<typeof restoreSignedInAccount>> | null>(null);
+  const [startupError, setStartupError] = useState<string | null>(null);
+  const [startupAttempt, setStartupAttempt] = useState(0);
 
-  React.useEffect(() => {
-    const timer = setTimeout(() => {
-      if (!restoredAccount.current) setCurrentScreen("FORK");
-    }, 4000);
+  useEffect(() => {
+    let active = true;
+    setStartupError(null);
+    setStartupResult(null);
     void restoreSignedInAccount()
-      .then((user) => {
-        if (!user) return;
-        restoredAccount.current = true;
-        clearTimeout(timer);
-        setShowNotificationPrompt(false);
-        setCurrentScreen("DASHBOARD");
+      .then((destination) => {
+        if (active) setStartupResult(destination);
       })
-      .catch(() => undefined);
-    return () => clearTimeout(timer);
+      .catch((error) => {
+        if (active) setStartupError(firebaseErrorMessage(error));
+      });
+    return () => { active = false; };
+  }, [startupAttempt]);
+
+  useEffect(() => {
+    if (splashFinished && startupResult && currentScreen === "SPLASH") {
+      setCurrentScreen(startupResult);
+    }
+  }, [splashFinished, startupResult, currentScreen]);
+
+  const finishSignIn = useCallback(async () => {
+    const destination = await restoreSignedInAccount();
+    if (destination === "FORK") throw new Error("Sign in was not completed. Please try again.");
+    setCurrentScreen(destination);
   }, []);
 
   const goTo = (s: ScreenState) => setCurrentScreen(s);
@@ -68,11 +80,17 @@ export default function App() {
   const renderScreen = () => {
     switch (currentScreen) {
       case "SPLASH":
+        if (splashFinished && startupError) {
+          return (
+            <View style={styles.startupError}>
+              <Text style={styles.startupMessage}>{startupError}</Text>
+              <SwipeAction label="retry connection" onActivate={() => setStartupAttempt((value) => value + 1)} />
+            </View>
+          );
+        }
         return (
           <SplashScreen
-            onComplete={() => {
-              if (!restoredAccount.current) goTo("FORK");
-            }}
+            onComplete={() => setSplashFinished(true)}
           />
         );
       case "FORK":
@@ -85,20 +103,17 @@ export default function App() {
       case "LOGIN":
         return (
           <LoginScreen
-            onComplete={() => {
-              setShowNotificationPrompt(false);
-              goTo("DASHBOARD");
-            }}
+            onComplete={finishSignIn}
             onBack={() => goTo("FORK")}
           />
         );
       case "SIGNUP":
         return (
           <SignupScreen
-            onComplete={() => goTo("CAROUSEL")}
+            onComplete={finishSignIn}
             onSubmit={async (values) => {
               await registerUserAccount(values);
-              goTo("CAROUSEL");
+              await finishSignIn();
             }}
             onBack={() => goTo("FORK")}
           />
@@ -108,9 +123,8 @@ export default function App() {
       case "FOG":
         return (
           <OnboardingScreen
-            onComplete={() => {
-              void persistOnboardingCompletion().catch(() => undefined);
-              setShowNotificationPrompt(true);
+            onComplete={async () => {
+              await persistOnboardingCompletion();
               goTo("DASHBOARD");
             }}
           />
@@ -122,7 +136,6 @@ export default function App() {
             onFocus={() => goTo("FOCUS")}
             onBreathe={() => goTo("BREATHE_DASHBOARD")}
             onOutdoors={() => goTo("OUTDOORS_DASHBOARD")}
-            showNotificationPrompt={showNotificationPrompt}
           />
         );
       case "PROFILE":
@@ -276,9 +289,7 @@ function FeatureDetail({
 }) {
   return (
     <View style={styles.featureDetail}>
-      <Pressable onPress={onBack}>
-        <Text style={styles.featureDetailBack}>← focus state.</Text>
-      </Pressable>
+      <SwipeAction label="focus state" onActivate={onBack} />
       <Text style={styles.featureDetailTitle}>{title}</Text>
       <Text style={styles.featureDetailLabel}>{label}</Text>
       <Text style={styles.featureDetailDescription}>{description}</Text>
@@ -287,6 +298,17 @@ function FeatureDetail({
 }
 
 const styles = StyleSheet.create({
+  startupError: {
+    flex: 1,
+    justifyContent: "center",
+    padding: 32,
+    backgroundColor: colors.bgDark,
+  },
+  startupMessage: {
+    color: colors.white,
+    fontSize: 16,
+    lineHeight: 24,
+  },
   outer: {
     flex: 1,
     backgroundColor: "#0a0a0a",

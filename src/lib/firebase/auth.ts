@@ -108,7 +108,10 @@ export async function updateCurrentUserEmail(
   if (user.isAnonymous) {
     throw new Error("Create an account before changing your email.");
   }
-  const credential = EmailAuthProvider.credential(email, currentPassword);
+  if (!user.email) {
+    throw new Error("Sign in again with your account provider to change your email.");
+  }
+  const credential = EmailAuthProvider.credential(user.email, currentPassword);
   await reauthenticateWithCredential(user, credential);
   await updateEmail(user, email);
 }

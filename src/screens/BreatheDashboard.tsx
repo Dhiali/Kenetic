@@ -1,7 +1,8 @@
 import { BlurView } from "expo-blur";
 import { LinearGradient } from "expo-linear-gradient";
-import React, { useEffect } from "react";
+import React, { useEffect, useRef } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
+import SwipeAction from "../components/SwipeAction";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
     Easing,
@@ -43,13 +44,30 @@ export default function BreatheDashboard({
   });
   const [launchError, setLaunchError] = React.useState<string | null>(null);
   const [launching, setLaunching] = React.useState(false);
+  const [metricsError, setMetricsError] = React.useState(false);
+  const [metricsLoaded, setMetricsLoaded] = React.useState(false);
+  const [reloadToken, setReloadToken] = React.useState(0);
+  const launchInProgress = useRef(false);
   const auraScale = useSharedValue(1);
   const auraMorph = useSharedValue(0);
   const exitX = useSharedValue(0);
   useEffect(() => {
+    let active = true;
+    setMetricsLoaded(false);
+    setMetricsError(false);
     void loadBreatheDashboardMetrics()
-      .then(setMetrics)
-      .catch(() => undefined);
+      .then((result) => {
+        if (!active) return;
+        setMetrics(result);
+        setMetricsLoaded(true);
+      })
+      .catch(() => {
+        if (active) setMetricsError(true);
+      });
+    return () => { active = false; };
+  }, [reloadToken]);
+
+  useEffect(() => {
     auraScale.value = withRepeat(
       withSequence(
         withTiming(1.08, { duration: 2600, easing: Easing.inOut(Easing.ease) }),
@@ -93,7 +111,8 @@ export default function BreatheDashboard({
     exercise: "calm-down" | "recenter" | "clear-mind" | "deep-relax",
     action: () => void,
   ) => {
-    if (launching) return;
+    if (launchInProgress.current || launching) return;
+    launchInProgress.current = true;
     setLaunching(true);
     setLaunchError(null);
     try {
@@ -102,6 +121,7 @@ export default function BreatheDashboard({
     } catch (error) {
       setLaunchError(firebaseErrorMessage(error));
     } finally {
+      launchInProgress.current = false;
       setLaunching(false);
     }
   };
@@ -116,12 +136,12 @@ export default function BreatheDashboard({
           locations={[0, 0.48, 1]}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
-          style={StyleSheet.absoluteFillObject}
+          style={StyleSheet.absoluteFill}
         />
         <BlurView
           intensity={70}
           tint="dark"
-          style={StyleSheet.absoluteFillObject}
+          style={StyleSheet.absoluteFill}
         />
       </Animated.View>
       <ScrollView
@@ -139,7 +159,7 @@ export default function BreatheDashboard({
           Use breath to settle your body, clear your attention, and return to
           the present moment.
         </Text>
-        <View style={styles.metrics}>
+        {metricsLoaded && <View style={styles.metrics}>
           <Metric
             value={`${metrics.completedSessions}`}
             label="sessions completed this week"
@@ -152,7 +172,10 @@ export default function BreatheDashboard({
             value={`${metrics.recoveryIndex}%`}
             label="calm index / nervous system recovery"
           />
-        </View>
+        </View>}
+        {metricsError && (
+          <SwipeAction label="Breathe statistics unavailable. Retry" onActivate={() => setReloadToken((value) => value + 1)} />
+        )}
         {launchError && <Text style={styles.launchError}>{launchError}</Text>}
         <View style={styles.gateways}>
           <Gateway

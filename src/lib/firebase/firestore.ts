@@ -3,6 +3,7 @@ import {
     collection,
     CollectionReference,
     deleteDoc,
+    deleteField,
     doc,
     DocumentData,
     DocumentReference,
@@ -26,6 +27,7 @@ export type UserProfile = {
   authProvider?: "anonymous" | "google.com" | "apple.com" | string;
   onboardingCompleted: boolean;
   notificationPreference?: "later" | "sure";
+  aiConsentVersion?: "v1" | "withdrawn";
   termsAccepted?: boolean;
   termsAcceptedAt?: unknown;
   createdAt?: unknown;
@@ -76,7 +78,7 @@ export type ScanHistoryRecord = {
   somaticPrompt?: string;
   includeInDailyQuizzes?: boolean;
   mode?: "visual" | "acoustic";
-  engine?: "deterministic-v1";
+  engine?: "deterministic-v1" | "gemini-v1";
   scanSessionId?: string;
   matchScore?: number;
   capturedAssetUri?: string;
@@ -154,7 +156,7 @@ export async function getUserProfile(uid: string) {
 
 export function updateProfileDetails(
   uid: string,
-  profile: { displayName?: string; photoUrl?: string },
+  profile: { displayName?: string; email?: string; photoUrl?: string },
 ) {
   return updateUserProfile(uid, profile);
 }
@@ -203,6 +205,9 @@ export async function saveRegisteredUserProfile(
   const existing = await getDoc(userReference(uid));
   const data = {
     ...profile,
+    onboardingCompleted: existing.exists()
+      ? existing.data().onboardingCompleted || profile.onboardingCompleted
+      : profile.onboardingCompleted,
     termsAccepted: true as const,
     termsAcceptedAt: existing.exists()
       ? (existing.data().termsAcceptedAt ?? serverTimestamp())
@@ -349,6 +354,11 @@ export async function saveInitialIntention(
   });
 }
 
+export async function hasInitialIntention(uid: string) {
+  const snapshot = await getDoc(doc(intentionsCollection(uid), "current"));
+  return snapshot.exists();
+}
+
 export function createSession(uid: string, session: SessionRecord) {
   return addDoc(sessionsCollection(uid), session);
 }
@@ -410,7 +420,7 @@ export async function getFocusDashboardMetrics(uid: string) {
     (session) => session.metadata?.mode === "alien-mode",
   );
   const handoffCompletedSessions = getShitDoneSessions.filter(
-    (session) => session.metadata?.handoffSeconds === 120,
+    (session) => session.metadata?.handoffCompleted === true || session.metadata?.handoffSeconds === 120,
   );
   const minutesFor = (records: typeof completedFocusSessions) =>
     records.reduce(
@@ -512,6 +522,8 @@ export async function deleteUserData(uid: string): Promise<boolean> {
     "savedPlaces",
     "intentions",
     "dashboardSelections",
+    "focusFeatureLaunches",
+    "breatheExerciseLaunches",
     "outdoorFeatureLaunches",
     "quizHistory",
   ];
@@ -528,13 +540,15 @@ export async function deleteUserData(uid: string): Promise<boolean> {
     }),
   );
 
+  if (!results.every(Boolean)) return false;
+
   try {
     await deleteDoc(userReference(uid));
   } catch {
     return false;
   }
 
-  return results.every(Boolean);
+  return true;
 }
 
 export function createScanHistory(
@@ -554,9 +568,22 @@ export function saveChallengeProgress(
 ) {
   return setDoc(
     doc(challengeProgressCollection(uid), challengeId),
-    { ...progress, challengeId },
+    {
+      ...progress,
+      challengeId,
+      ...(progress.status !== "completed" ? { completedAt: deleteField() } : {}),
+    },
     { merge: true },
   );
+}
+
+export async function getChallengeProgress(uid: string, challengeId: string) {
+  const snapshot = await getDoc(doc(challengeProgressCollection(uid), challengeId));
+  return snapshot.exists() ? snapshot.data() : null;
+}
+
+export function deleteChallengeProgress(uid: string, challengeId: string) {
+  return deleteDoc(doc(challengeProgressCollection(uid), challengeId));
 }
 
 export function savePlace(
@@ -569,6 +596,27 @@ export function savePlace(
     { ...place, placeId, savedAt: serverTimestamp() },
     { merge: true },
   );
+}
+
+export async function listSavedPlaces(uid: string) {
+  const snapshot = await getDocs(savedPlacesCollection(uid));
+  return snapshot.docs.map((item) => item.data());
+}
+
+export async function createSavedPlace(
+  uid: string,
+  place: Omit<SavedPlaceRecord, "placeId" | "savedAt">,
+) {
+  const reference = doc(savedPlacesCollection(uid));
+  await savePlace(uid, reference.id, place);
+}
+
+export function renameSavedPlace(uid: string, placeId: string, name: string) {
+  return updateDoc(doc(savedPlacesCollection(uid), placeId), { name });
+}
+
+export function deleteSavedPlace(uid: string, placeId: string) {
+  return deleteDoc(doc(savedPlacesCollection(uid), placeId));
 }
 
 export async function getOutdoorDashboardMetrics(uid: string) {
@@ -686,6 +734,11 @@ export async function getQuizQueue(
     if (queue.length >= maxItems) break;
   }
   return queue;
+}
+
+export async function getAnsweredQuizQuestionIds(uid: string) {
+  const snapshot = await getDocs(quizHistoryCollection(uid));
+  return snapshot.docs.map((entry) => entry.data().questionId);
 }
 
 export function userSubcollection<T extends DocumentData>(

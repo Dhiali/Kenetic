@@ -1,26 +1,19 @@
 import {
     Camera,
-    CameraPermissionResponse,
+    PermissionResponse,
     PermissionStatus,
 } from "expo-camera";
 
 export type CameraAccess = {
-  camera: CameraPermissionResponse;
-  microphone: CameraPermissionResponse;
+  camera: PermissionResponse;
   granted: boolean;
 };
 
 export async function getCameraAccess(): Promise<CameraAccess> {
-  const [camera, microphone] = await Promise.all([
-    Camera.getCameraPermissionsAsync(),
-    Camera.getMicrophonePermissionsAsync(),
-  ]);
+  const camera = await Camera.getCameraPermissionsAsync();
   return {
     camera,
-    microphone,
-    granted:
-      camera.status === PermissionStatus.GRANTED &&
-      microphone.status === PermissionStatus.GRANTED,
+    granted: camera.status === PermissionStatus.GRANTED,
   };
 }
 
@@ -32,16 +25,8 @@ export async function requestCameraAccess(): Promise<CameraAccess> {
     current.camera.status === PermissionStatus.GRANTED
       ? current.camera
       : await Camera.requestCameraPermissionsAsync();
-  const microphone =
-    current.microphone.status === PermissionStatus.GRANTED
-      ? current.microphone
-      : await Camera.requestMicrophonePermissionsAsync();
-
   return {
     camera,
-    microphone,
-    granted:
-      camera.status === PermissionStatus.GRANTED &&
-      microphone.status === PermissionStatus.GRANTED,
+    granted: camera.status === PermissionStatus.GRANTED,
   };
 }

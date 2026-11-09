@@ -2,11 +2,11 @@ import { BlurView } from "expo-blur";
 import {
     CameraView,
     useCameraPermissions,
-    useMicrophonePermissions,
 } from "expo-camera";
 import * as Haptics from "expo-haptics";
+import { File } from "expo-file-system";
 import { LinearGradient } from "expo-linear-gradient";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
     Image,
     Pressable,
@@ -38,6 +38,13 @@ import {
     startBioRadarSession,
 } from "../lib/firebase/bootstrap";
 import { firebaseErrorMessage } from "../lib/firebase/errors";
+import SwipeAction from "../components/SwipeAction";
+import AiConsent from "../components/AiConsent";
+import { useAiConsent } from "../lib/ai/useAiConsent";
+import { analyzeNature, type NatureResult } from "../lib/ai/client";
+import { getCuratedQuizItems } from "../lib/outdoors/curatedQuiz";
+import DailyChallengesScreen from "./DailyChallengesScreen";
+import SpotFinderScreen from "./SpotFinderScreen";
 
 export type OutdoorFeature =
   | "bio-radar"
@@ -46,48 +53,8 @@ export type OutdoorFeature =
   | "daily-challenges";
 
 type Props = { feature: OutdoorFeature; onBack: () => void };
-type BioMode = "visual" | "acoustic";
 type BioPhase = "live" | "processing" | "dossier";
-type ActiveBioSession = { id: string; startedAtMs: number; mode: BioMode };
-
-type Species = {
-  commonName: string;
-  scientificName: string;
-  origin: string;
-  role: string;
-  fact: string;
-  somaticPrompt: string;
-};
-
-const SPECIES_LIBRARY: Species[] = [
-  {
-    commonName: "EUROPEAN ROBIN",
-    scientificName: "Erithacus rubecula",
-    origin: "Native to Europe, Western Siberia, and North Africa.",
-    role: "Key seed disperser and soil ecosystem indicator.",
-    fact: "Navigates using a magnetic compass in its eye sensitive to blue light.",
-    somaticPrompt:
-      "Listen for 30 seconds. Try to isolate this bird call from background wind.",
-  },
-  {
-    commonName: "COMMON OAK",
-    scientificName: "Quercus robur",
-    origin: "Native across most of Europe and temperate western Asia.",
-    role: "Supports hundreds of insect species and stabilizes forest soils.",
-    fact: "An old oak can host more biodiversity than a young mixed woodland patch.",
-    somaticPrompt:
-      "Place your palm on bark for 20 seconds and track breath lengthening.",
-  },
-  {
-    commonName: "RED FOX",
-    scientificName: "Vulpes vulpes",
-    origin: "Widely distributed across Europe, Asia, and North Africa.",
-    role: "Balances rodent populations and supports trophic stability.",
-    fact: "Uses the Earth's magnetic field as an aiming aid while hunting.",
-    somaticPrompt:
-      "Walk 12 slow steps and listen for the quietest sound you can detect.",
-  },
-];
+type ActiveBioSession = { id: string; startedAtMs: number; mode: "visual" };
 
 const QUESTION_BANK: Record<
   string,
@@ -139,79 +106,32 @@ const FALLBACK_QUESTION = {
 export default function OutdoorFeatureScreen({ feature, onBack }: Props) {
   if (feature === "bio-radar") return <BioRadarExperience onBack={onBack} />;
   if (feature === "quizzes") return <QuizzesExperience onBack={onBack} />;
-
-  const exitX = useSharedValue(0);
-  const exit = Gesture.Pan()
-    .activeOffsetX(10)
-    .onUpdate((event) => {
-      if (event.translationX > 0) exitX.value = event.translationX;
-    })
-    .onEnd((event) => {
-      if (event.translationX > 90) runOnJS(onBack)();
-      else exitX.value = withSpring(0);
-    });
-
-  const style = useAnimatedStyle(() => ({
-    transform: [{ translateX: exitX.value }],
-  }));
-
-  useEffect(() => {
-    void persistOutdoorFeatureLaunch(feature).catch(() => undefined);
-  }, [feature]);
-
-  return (
-    <GestureDetector gesture={exit}>
-      <Animated.View
-        style={[styles.screen, style]}
-        entering={FadeIn.duration(360)}
-      >
-        <ScrollView
-          contentContainerStyle={styles.content}
-          showsVerticalScrollIndicator={false}
-        >
-          <Pressable onPress={onBack} hitSlop={12}>
-            <Text style={styles.back}>&lt;- outdoors</Text>
-          </Pressable>
-          <Text style={styles.eyebrow}>{feature.replace("-", " ")}</Text>
-          {feature === "spot-finder" && (
-            <ComingSoonFeature title="spot finder." />
-          )}
-          {feature === "daily-challenges" && (
-            <ComingSoonFeature title="daily challenges." />
-          )}
-        </ScrollView>
-      </Animated.View>
-    </GestureDetector>
-  );
+  if (feature === "daily-challenges") return <DailyChallengesScreen onBack={onBack} />;
+  return <SpotFinderScreen onBack={onBack} />;
 }
 
 function BioRadarExperience({ onBack }: { onBack: () => void }) {
   const cameraPermissionHook = useCameraPermissions();
-  const microphonePermissionHook = useMicrophonePermissions();
   const cameraPermission = Array.isArray(cameraPermissionHook)
     ? cameraPermissionHook[0]
     : null;
   const requestCameraPermission = Array.isArray(cameraPermissionHook)
     ? cameraPermissionHook[1]
     : async () => null;
-  const microphonePermission = Array.isArray(microphonePermissionHook)
-    ? microphonePermissionHook[0]
-    : null;
-  const requestMicrophonePermission = Array.isArray(microphonePermissionHook)
-    ? microphonePermissionHook[1]
-    : async () => null;
   const cameraReference = useRef<CameraView | null>(null);
 
   const holdHumInterval = useRef<ReturnType<typeof setInterval> | null>(null);
-  const processingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const telemetryTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const activeSessionReference = useRef<ActiveBioSession | null>(null);
+  const processingRef = useRef(false);
+  const savingRef = useRef(false);
+  const mountedRef = useRef(true);
+  const photoRef = useRef<string | null>(null);
 
-  const [mode, setMode] = useState<BioMode>("visual");
   const [phase, setPhase] = useState<BioPhase>("live");
-  const [scanSeed, setScanSeed] = useState(0);
+  const [discovery, setDiscovery] = useState<NatureResult | null>(null);
+  const aiConsent = useAiConsent();
   const [frozenUri, setFrozenUri] = useState<string | null>(null);
-  const [includeQuiz, setIncludeQuiz] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [telemetryIndex, setTelemetryIndex] = useState(0);
@@ -225,19 +145,11 @@ function BioRadarExperience({ onBack }: { onBack: () => void }) {
   const sweep = useSharedValue(0);
   const exitX = useSharedValue(0);
 
-  const yesX = useSharedValue(0);
-  const yesY = useSharedValue(0);
   const discoveredX = useSharedValue(0);
   const discoveredY = useSharedValue(0);
 
-  const discovery = useMemo(() => {
-    const index = Math.abs(scanSeed) % SPECIES_LIBRARY.length;
-    return SPECIES_LIBRARY[index];
-  }, [scanSeed]);
-
-  const matchScore = 95 + (scanSeed % 4);
-
   useEffect(() => {
+    mountedRef.current = true;
     auraRotate.value = withRepeat(
       withTiming(360, { duration: 9000, easing: Easing.linear }),
       -1,
@@ -252,8 +164,12 @@ function BioRadarExperience({ onBack }: { onBack: () => void }) {
       true,
     );
     return () => {
+      mountedRef.current = false;
+      if (photoRef.current) {
+        try { new File(photoRef.current).delete(); }
+        catch (cleanupError) { console.error("Could not remove temporary photo", cleanupError); }
+      }
       if (holdHumInterval.current) clearInterval(holdHumInterval.current);
-      if (processingTimer.current) clearTimeout(processingTimer.current);
       if (telemetryTimer.current) clearInterval(telemetryTimer.current);
       const session = activeSessionReference.current;
       if (session) {
@@ -264,7 +180,7 @@ function BioRadarExperience({ onBack }: { onBack: () => void }) {
         void finishBioRadarSession(session.id, durationSeconds, false, {
           scanMode: session.mode,
           reason: "view-unmounted",
-        });
+        }).catch((cleanupError) => console.error("Could not close Bio Radar session", cleanupError));
         activeSessionReference.current = null;
       }
     };
@@ -314,7 +230,6 @@ function BioRadarExperience({ onBack }: { onBack: () => void }) {
   const closeActiveSession = async (reason: string) => {
     const session = activeSessionReference.current;
     if (!session) return;
-    setSessionState(null);
     const durationSeconds = Math.max(
       1,
       Math.round((Date.now() - session.startedAtMs) / 1000),
@@ -323,12 +238,21 @@ function BioRadarExperience({ onBack }: { onBack: () => void }) {
       scanMode: session.mode,
       reason,
     });
+    setSessionState(null);
   };
 
-  const handleBackFromBioRadar = () => {
+  const handleBackFromBioRadar = async () => {
+    if (processingRef.current) {
+      setError("Please wait for the current scan to finish.");
+      return;
+    }
     clearHold();
-    void closeActiveSession("user-exit").catch(() => undefined);
-    onBack();
+    try {
+      await closeActiveSession("user-exit");
+      onBack();
+    } catch (caught) {
+      setError(`Could not close the session: ${firebaseErrorMessage(caught)}`);
+    }
   };
 
   const beginHoldHum = () => {
@@ -341,43 +265,33 @@ function BioRadarExperience({ onBack }: { onBack: () => void }) {
     }, 180);
   };
 
-  const finishProcessing = () => {
-    if (telemetryTimer.current) clearInterval(telemetryTimer.current);
-    telemetryTimer.current = null;
-    setPhase("dossier");
-    triggerHeavy();
-  };
-
   const beginProcessing = async () => {
-    if (phase !== "live") return;
+    if (phase !== "live" || aiConsent.status !== "agreed" || processingRef.current) return;
     if (saving) return;
-    const permissionReady =
-      mode === "visual"
-        ? cameraPermission?.granted
-        : microphonePermission?.granted;
-    if (!permissionReady) {
+    if (!cameraPermission?.granted) {
       clearHold();
       triggerError();
-      setError(
-        mode === "visual"
-          ? "Grant camera permission to start a visual scan."
-          : "Grant microphone permission to start an acoustic scan.",
-      );
+      setError("Grant camera permission to start a photo scan.");
       return;
     }
     clearHold();
     setError("");
-    setIncludeQuiz(false);
+    processingRef.current = true;
 
-    const sessionId = await startBioRadarSession(mode).catch((caught) => {
+    const sessionId = await startBioRadarSession("visual").catch((caught) => {
       triggerError();
       setError(firebaseErrorMessage(caught));
       return null;
     });
-    if (!sessionId) return;
+    if (!sessionId) { processingRef.current = false; return; }
+    if (!mountedRef.current) {
+      processingRef.current = false;
+      try { await finishBioRadarSession(sessionId, 0, false, { scanMode: "visual", reason: "view-unmounted" }); }
+      catch (cleanupError) { console.error("Could not close Bio Radar session", cleanupError); }
+      return;
+    }
 
-    setSessionState({ id: sessionId, startedAtMs: Date.now(), mode });
-    setPhase("processing");
+    setSessionState({ id: sessionId, startedAtMs: Date.now(), mode: "visual" });
     setTelemetryIndex(0);
     sweep.value = 0;
     sweep.value = withRepeat(
@@ -386,21 +300,44 @@ function BioRadarExperience({ onBack }: { onBack: () => void }) {
       false,
     );
 
-    if (mode === "visual") {
-      const picture = await cameraReference.current
-        ?.takePictureAsync({ quality: 0.35, skipProcessing: true })
-        .catch(() => null);
-      setFrozenUri(picture?.uri ?? null);
-    } else {
-      setFrozenUri(null);
+    let mediaUri: string | null = null;
+    let succeeded = false;
+    try {
+      const picture = await cameraReference.current?.takePictureAsync({ quality: 0.35 });
+      if (!picture?.uri) throw new Error("Could not capture a photo. Please try again.");
+      mediaUri = picture.uri;
+      photoRef.current = mediaUri;
+      setFrozenUri(mediaUri);
+      setPhase("processing");
+      telemetryTimer.current = setInterval(() => setTelemetryIndex((current) => (current + 1) % 3), 800);
+      if (!mountedRef.current) return;
+      const result = await analyzeNature(mediaUri);
+      if (!mountedRef.current) return;
+      setDiscovery(result);
+      setPhase("dossier");
+      succeeded = true;
+      triggerHeavy();
+    } catch (caught) {
+      if (mountedRef.current) {
+        setError(firebaseErrorMessage(caught));
+        setPhase("live");
+        void aiConsent.refresh();
+        setFrozenUri(null);
+        try { await closeActiveSession("scan-failed"); }
+        catch (finishError) { setError(`${firebaseErrorMessage(caught)} Session cleanup failed: ${firebaseErrorMessage(finishError)}`); }
+      }
+    } finally {
+      if (mediaUri && (!succeeded || !mountedRef.current)) {
+        try {
+          new File(mediaUri).delete();
+          if (photoRef.current === mediaUri) photoRef.current = null;
+        }
+        catch (cleanupError) { if (mountedRef.current) setError(`Could not remove temporary media: ${firebaseErrorMessage(cleanupError)}`); }
+      }
+      if (telemetryTimer.current) clearInterval(telemetryTimer.current);
+      telemetryTimer.current = null;
+      processingRef.current = false;
     }
-
-    telemetryTimer.current = setInterval(() => {
-      setTelemetryIndex((current) => (current + 1) % 3);
-      triggerLight();
-    }, 420);
-
-    processingTimer.current = setTimeout(finishProcessing, 2300);
   };
 
   const onReticlePressIn = () => {
@@ -419,44 +356,9 @@ function BioRadarExperience({ onBack }: { onBack: () => void }) {
     if (phase === "live") clearHold();
   };
 
-  const activateMode = (nextMode: BioMode) => {
-    if (phase !== "live") return;
-    setMode(nextMode);
-    if (nextMode === "visual") void requestCameraPermission();
-    if (nextMode === "acoustic") void requestMicrophonePermission();
-    triggerLight();
-  };
-
-  const modeGesture = Gesture.Pan().onEnd((event) => {
-    if (event.translationX < -30) runOnJS(activateMode)("acoustic");
-    if (event.translationX > 30) runOnJS(activateMode)("visual");
-  });
-
-  const yesGesture = Gesture.Pan()
-    .enabled(!includeQuiz)
-    .onBegin(() => {
-      runOnJS(triggerLight)();
-    })
-    .onUpdate((event) => {
-      if (includeQuiz) return;
-      yesX.value = event.translationX;
-      yesY.value = event.translationY;
-    })
-    .onEnd(() => {
-      if (includeQuiz) return;
-      if (yesX.value > 55 && Math.abs(yesY.value) < 60) {
-        runOnJS(setIncludeQuiz)(true);
-        yesX.value = withSpring(0, { damping: 14, stiffness: 240 });
-        yesY.value = withSpring(0, { damping: 14, stiffness: 240 });
-        runOnJS(triggerMedium)();
-        return;
-      }
-      yesX.value = withSpring(0);
-      yesY.value = withSpring(0);
-    });
-
   const commitDiscovery = async () => {
-    if (saving) return;
+    if (savingRef.current || !discovery) return;
+    savingRef.current = true;
     setSaving(true);
     setError("");
     const session = activeSessionReference.current;
@@ -467,60 +369,62 @@ function BioRadarExperience({ onBack }: { onBack: () => void }) {
     let scanSaved = false;
     try {
       await persistOutdoorScan({
-        source: mode === "visual" ? "camera" : "microphone",
-        title: discovery.commonName,
+        source: "camera",
+        title: discovery.name,
         scientificName: discovery.scientificName,
-        summary: `Origin: ${discovery.origin} Eco-role: ${discovery.role}`,
-        ecologicalSignificance: discovery.fact,
-        somaticPrompt: discovery.somaticPrompt,
-        includeInDailyQuizzes: includeQuiz,
-        mode,
-        engine: "deterministic-v1",
+        summary: `${discovery.summary} ${discovery.uncertainty}`,
+        includeInDailyQuizzes: false,
+        mode: "visual",
+        engine: "gemini-v1",
         ...(sessionId ? { scanSessionId: sessionId } : {}),
-        matchScore,
-        ...(frozenUri ? { capturedAssetUri: frozenUri } : {}),
       });
       scanSaved = true;
 
       if (sessionId) {
         await finishBioRadarSession(sessionId, durationSeconds, true, {
-          scanMode: mode,
-          species: discovery.commonName,
-          includeInDailyQuizzes: includeQuiz,
-          matchScore,
+          scanMode: "visual",
+          species: discovery.name,
+          includeInDailyQuizzes: false,
         });
       }
 
       setSessionState(null);
       triggerHeavy();
-      setScanSeed((value) => value + 1);
+      if (frozenUri) {
+        try { new File(frozenUri).delete(); photoRef.current = null; }
+        catch (cleanupError) { console.error("Could not remove temporary photo", cleanupError); }
+      }
+      setDiscovery(null);
+      void aiConsent.refresh();
       setPhase("live");
       setFrozenUri(null);
-      yesX.value = 0;
-      yesY.value = 0;
       discoveredX.value = 0;
       discoveredY.value = 0;
       holdProgress.value = 0;
     } catch (caught) {
       if (scanSaved) {
+        if (frozenUri) {
+          try { new File(frozenUri).delete(); photoRef.current = null; }
+          catch (cleanupError) { console.error("Could not remove temporary photo", cleanupError); }
+        }
         setSessionState(null);
         triggerHeavy();
-        setScanSeed((value) => value + 1);
+        setDiscovery(null);
+        void aiConsent.refresh();
         setPhase("live");
         setFrozenUri(null);
-        yesX.value = 0;
-        yesY.value = 0;
         discoveredX.value = 0;
         discoveredY.value = 0;
         holdProgress.value = 0;
         setError(
-          "Discovery saved. Session analytics could not be finalized; retrying on your next scan.",
+          "Discovery saved, but its session analytics could not be finalized.",
         );
       } else {
         triggerError();
         setError(firebaseErrorMessage(caught));
       }
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   };
@@ -571,15 +475,11 @@ function BioRadarExperience({ onBack }: { onBack: () => void }) {
 
   const reticleStyle = useAnimatedStyle(() => ({
     transform: [{ scale: interpolate(holdProgress.value, [0, 1], [1, 1.14]) }],
-    borderColor: mode === "visual" ? "#22c55e" : "#fb923c",
+    borderColor: "#22c55e",
   }));
 
   const sweepStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: interpolate(sweep.value, [0, 1], [-260, 260]) }],
-  }));
-
-  const yesStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: yesX.value }, { translateY: yesY.value }],
   }));
 
   const discoveredStyle = useAnimatedStyle(() => ({
@@ -591,12 +491,12 @@ function BioRadarExperience({ onBack }: { onBack: () => void }) {
   }));
 
   const telemetryLines = [
-    "analyzing cellular structure...",
-    "matching acoustic frequency...",
-    `${matchScore}.0% biological match score`,
+    "preparing your photo...",
+    "asking Gemini...",
+    "results may be uncertain",
   ];
 
-  const showCamera = phase === "live" && mode === "visual";
+  const showCamera = phase === "live" && aiConsent.status === "agreed";
 
   return (
     <Animated.View
@@ -606,13 +506,13 @@ function BioRadarExperience({ onBack }: { onBack: () => void }) {
       {showCamera && cameraPermission?.granted ? (
         <CameraView
           ref={cameraReference}
-          style={StyleSheet.absoluteFillObject}
+          style={StyleSheet.absoluteFill}
           facing="back"
         />
       ) : frozenUri ? (
         <Image
           source={{ uri: frozenUri }}
-          style={StyleSheet.absoluteFillObject}
+          style={StyleSheet.absoluteFill}
         />
       ) : (
         <View style={styles.bioFallback} />
@@ -628,49 +528,45 @@ function BioRadarExperience({ onBack }: { onBack: () => void }) {
         </View>
       </GestureDetector>
 
-      {phase === "live" && (
-        <View style={styles.reticleLayer}>
-          {showCamera && !cameraPermission?.granted && (
-            <Pressable
-              onPress={() => void requestCameraPermission()}
-              style={styles.permissionButton}
-            >
-              <Text style={styles.permissionText}>grant camera permission</Text>
-            </Pressable>
+      {phase === "live" && aiConsent.status !== "agreed" && (
+        <ScrollView style={styles.consentScroll} contentContainerStyle={styles.consentContent}>
+          {aiConsent.status === "loading" && <Text style={styles.telemetry}>Checking AI agreement...</Text>}
+          {aiConsent.status === "not-agreed" && (
+            <AiConsent disabled={aiConsent.saving} onAgree={() => void aiConsent.change(true)} />
           )}
-          {mode === "acoustic" && !microphonePermission?.granted && (
-            <Pressable
-              onPress={() => void requestMicrophonePermission()}
-              style={styles.permissionButton}
-            >
-              <Text style={styles.permissionText}>
-                grant microphone permission
-              </Text>
-            </Pressable>
+          {!!aiConsent.error && <Text style={styles.error}>{aiConsent.error}</Text>}
+          {aiConsent.status === "error" && <SwipeAction label="retry checking AI agreement" onActivate={() => void aiConsent.refresh()} />}
+          {!!error && <Text style={styles.error}>{error}</Text>}
+        </ScrollView>
+      )}
+      {phase === "live" && aiConsent.status === "agreed" && (
+        <View style={styles.reticleLayer}>
+          <Text style={styles.telemetry}>A scan sends a photo to Gemini. Results are estimates, not safety advice. Avoid photographing people or private information.</Text>
+          {!!error && <Text style={styles.error}>{error}</Text>}
+          {showCamera && !cameraPermission?.granted && (
+            <SwipeAction label="grant camera permission" onActivate={() => void requestCameraPermission()} />
           )}
 
           <Pressable
             onPressIn={onReticlePressIn}
             onPressOut={onReticlePressOut}
+            accessibilityLabel="Start nature discovery"
+            accessibilityHint="Hold for two seconds to start, or use the activate accessibility action."
+            accessibilityActions={[{ name: "activate", label: "Start discovery" }]}
+            onAccessibilityAction={(event) => {
+              if (event.nativeEvent.actionName === "activate") void beginProcessing();
+            }}
           >
             <Animated.View style={[styles.reticleAura, auraStyle]}>
               <LinearGradient
-                colors={
-                  mode === "visual"
-                    ? [
-                        "rgba(22,163,74,0.75)",
-                        "rgba(34,197,94,0.15)",
-                        "rgba(34,197,94,0)",
-                      ]
-                    : [
-                        "rgba(249,115,22,0.75)",
-                        "rgba(251,146,60,0.15)",
-                        "rgba(251,146,60,0)",
-                      ]
-                }
+                colors={[
+                  "rgba(22,163,74,0.75)",
+                  "rgba(34,197,94,0.15)",
+                  "rgba(34,197,94,0)",
+                ]}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
-                style={StyleSheet.absoluteFillObject}
+                style={StyleSheet.absoluteFill}
               />
             </Animated.View>
             <Animated.View style={[styles.reticleRing, reticleStyle]}>
@@ -694,39 +590,22 @@ function BioRadarExperience({ onBack }: { onBack: () => void }) {
               {telemetryLines[(telemetryIndex + 2) % 3]}
             </Text>
           </View>
+          {!!error && <Text style={styles.error}>{error}</Text>}
         </View>
       )}
 
-      {phase === "dossier" && (
+      {phase === "dossier" && discovery && (
         <View style={styles.dossierSheet}>
           <View style={styles.dossierBlob} />
-          <Text style={styles.dossierTitle}>{discovery.commonName}</Text>
+          <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
+          <SwipeAction label="back to outdoors" disabled={saving} onActivate={() => void handleBackFromBioRadar()} />
+          <Text style={styles.dossierTitle}>{discovery.name}</Text>
           <Text style={styles.dossierSubtitle}>{discovery.scientificName}</Text>
 
-          <Text style={styles.dossierRow}>ORIGIN | {discovery.origin}</Text>
-          <Text style={styles.dossierRow}>ECO-ROLE | {discovery.role}</Text>
-          <Text style={styles.dossierRow}>
-            CURIOSITY FACT | {discovery.fact}
-          </Text>
-          <Text style={styles.matchText}>MATCH SCORE | {matchScore}.0%</Text>
-
-          <View style={styles.quizRitualRow}>
-            <Text style={styles.quizLabel}>include in daily quizzes?</Text>
-            <View style={styles.quizWordWrap}>
-              <GestureDetector gesture={yesGesture}>
-                <Animated.Text
-                  style={[
-                    styles.quizWordActive,
-                    yesStyle,
-                    includeQuiz ? styles.quizWordActiveSnapped : null,
-                  ]}
-                >
-                  yes
-                </Animated.Text>
-              </GestureDetector>
-              <Text style={styles.quizWordTarget}>yes</Text>
-            </View>
-          </View>
+          <Text style={styles.dossierRow}>{discovery.summary}</Text>
+          <Text style={styles.dossierRow}>{discovery.uncertainty}</Text>
+          <Text style={styles.matchText}>AI ESTIMATE ONLY. DO NOT USE FOR EATING, HANDLING OR SAFETY DECISIONS.</Text>
+          <Text style={styles.dossierRow}>AI discoveries are not added to quizzes.</Text>
 
           <View style={styles.discoveredRow}>
             <Text style={styles.discoveredLabel}>drag and drop to save</Text>
@@ -745,14 +624,13 @@ function BioRadarExperience({ onBack }: { onBack: () => void }) {
               <Text style={styles.discoveredTarget}>discovered</Text>
             </View>
           </View>
+          <SwipeAction label={saving ? "saving discovery" : "save discovery"} disabled={saving} onActivate={() => void commitDiscovery()} />
 
           {!!error && <Text style={styles.error}>{error}</Text>}
+          </ScrollView>
         </View>
       )}
 
-      <GestureDetector gesture={modeGesture}>
-        <View style={styles.modeSelector} />
-      </GestureDetector>
     </Animated.View>
   );
 }
@@ -781,6 +659,7 @@ function QuizzesExperience({ onBack }: { onBack: () => void }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [loadFailed, setLoadFailed] = useState(false);
+  const savingQuizRef = useRef(false);
   const [reloadToken, setReloadToken] = useState(0);
 
   const exitX = useSharedValue(0);
@@ -823,13 +702,13 @@ function QuizzesExperience({ onBack }: { onBack: () => void }) {
     setLoading(true);
     setLoadFailed(false);
     loadOutdoorQuizQueue()
-      .then((records) => {
+      .then(({ discoveries, answeredIds }) => {
         if (cancelled) return;
-        const items: QuizItem[] = records.map((record) => {
+        const items: QuizItem[] = discoveries.map((record) => {
           const question = QUESTION_BANK[record.title] ?? FALLBACK_QUESTION;
           return { ...record, ...question };
         });
-        setQueue(items);
+        setQueue([...items, ...getCuratedQuizItems(new Date(), answeredIds)]);
         setQueueIndex(0);
         setStage("lobby");
         setError("");
@@ -960,6 +839,8 @@ function QuizzesExperience({ onBack }: { onBack: () => void }) {
       option1Y.value = 0;
       option2Y.value = 0;
       retainedX.value = 0;
+      savingQuizRef.current = false;
+      setSaving(false);
     };
     transitionX.value = withTiming(-420, { duration: 260 }, (finished) => {
       if (!finished) return;
@@ -970,7 +851,8 @@ function QuizzesExperience({ onBack }: { onBack: () => void }) {
   };
 
   const commitRetention = async () => {
-    if (saving || !currentItem || correct === null) return;
+    if (savingQuizRef.current || !currentItem || correct === null) return;
+    savingQuizRef.current = true;
     setSaving(true);
     setError("");
     try {
@@ -984,7 +866,7 @@ function QuizzesExperience({ onBack }: { onBack: () => void }) {
     } catch (caught) {
       triggerError();
       setError(firebaseErrorMessage(caught));
-    } finally {
+      savingQuizRef.current = false;
       setSaving(false);
     }
   };
@@ -1056,12 +938,20 @@ function QuizzesExperience({ onBack }: { onBack: () => void }) {
       entering={FadeIn.duration(360)}
     >
       <GestureDetector gesture={exitGesture}>
-        <View style={styles.quizNavRow}>
-          <Pressable onPress={onBack} hitSlop={12}>
-            <Text style={navOnLight ? styles.quizNavBackDark : styles.bioBack}>
-              &lt;- outdoors
-            </Text>
-          </Pressable>
+        <View
+            accessible
+            accessibilityRole="adjustable"
+            accessibilityLabel="Return to outdoors"
+            accessibilityActions={[{ name: "activate", label: "Return to outdoors" }]}
+            onAccessibilityAction={(event) => {
+              if (event.nativeEvent.actionName === "activate") onBack();
+            }}
+            onAccessibilityTap={onBack}
+            style={styles.quizNavRow}
+          >
+          <Text style={navOnLight ? styles.quizNavBackDark : styles.bioBack}>
+            &lt;- outdoors
+          </Text>
           <Text style={navOnLight ? styles.quizNavHintDark : styles.bioHint}>
             (drag right to return)
           </Text>
@@ -1073,16 +963,21 @@ function QuizzesExperience({ onBack }: { onBack: () => void }) {
           <Text style={styles.quizLoadingText}>loading queue...</Text>
         </View>
       )}
+      {!loading && loadFailed && (
+        <View style={styles.quizEmptyLayer}>
+          <Text style={styles.quizTitle}>curiosity quizzes.</Text>
+          <SwipeAction label="Quiz unavailable. Retry" onActivate={retryLoad} />
+        </View>
+      )}
 
-      {!loading && !currentItem && (
+      {!loading && !loadFailed && !currentItem && (
         <View style={styles.quizEmptyLayer}>
           <Text style={styles.quizTitle}>curiosity quizzes.</Text>
           <Text style={styles.quizSubtitle}>
-            no discoveries waiting for recall.
+            today's questions are complete.
           </Text>
           <Text style={styles.quizEmptyHint}>
-            flag a species as "include in daily quizzes" during your next bio
-            radar scan.
+            reopen quizzes after midnight UTC for today's questions.
           </Text>
         </View>
       )}
@@ -1091,7 +986,10 @@ function QuizzesExperience({ onBack }: { onBack: () => void }) {
         <View style={styles.quizLobbyLayer}>
           <Text style={styles.quizTitle}>curiosity quizzes.</Text>
           <Text style={styles.quizSubtitle}>
-            {remaining} discoveries waiting for recall
+            {remaining} questions waiting for recall
+          </Text>
+          <Text style={styles.quizEmptyHint}>
+            {currentItem.scanId.startsWith("general-") ? "general nature question" : "saved discovery question"}
           </Text>
 
           <View style={styles.quizSandPoolWrap} pointerEvents="none">
@@ -1131,14 +1029,14 @@ function QuizzesExperience({ onBack }: { onBack: () => void }) {
                       "rgba(59,130,246,0.25)",
                       "rgba(59,130,246,0)",
                     ]}
-                    style={StyleSheet.absoluteFillObject}
+                    style={StyleSheet.absoluteFill}
                   />
                 </View>
                 <View style={styles.quizTruthCircle}>
                   <BlurView
                     intensity={40}
                     tint="dark"
-                    style={StyleSheet.absoluteFillObject}
+                    style={StyleSheet.absoluteFill}
                   />
                   <Text style={styles.quizTruthCircleText}>
                     drag truth here
@@ -1185,52 +1083,6 @@ function QuizzesExperience({ onBack }: { onBack: () => void }) {
 
       {!!error && <Text style={styles.quizError}>{error}</Text>}
     </Animated.View>
-  );
-}
-
-function ComingSoonFeature({ title }: { title: string }) {
-  return (
-    <FeaturePanel title={title} subtitle="feature coming soon">
-      <Text style={styles.result}>Feature coming soon.</Text>
-    </FeaturePanel>
-  );
-}
-
-function FeaturePanel({
-  title,
-  subtitle,
-  children,
-}: {
-  title: string;
-  subtitle: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <View style={styles.panel}>
-      <Text style={styles.panelTitle}>{title}</Text>
-      <Text style={styles.panelSubtitle}>{subtitle}</Text>
-      {children}
-    </View>
-  );
-}
-
-function Action({
-  title,
-  onPress,
-  disabled = false,
-}: {
-  title: string;
-  onPress: () => void;
-  disabled?: boolean;
-}) {
-  return (
-    <Pressable
-      disabled={disabled}
-      onPress={onPress}
-      style={[styles.action, disabled && styles.disabled]}
-    >
-      <Text style={styles.actionText}>{title}</Text>
-    </Pressable>
   );
 }
 
@@ -1302,11 +1154,11 @@ const styles = StyleSheet.create({
   bioRoot: { flex: 1, backgroundColor: "#090909" },
   bioFallback: { flex: 1, backgroundColor: "#0f1110" },
   bioOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: "rgba(6,7,6,0.56)",
   },
   gridOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     borderColor: "rgba(255,255,255,0.05)",
     borderWidth: 1,
   },
@@ -1321,6 +1173,8 @@ const styles = StyleSheet.create({
   },
   bioBack: { color: "#f8fafc", fontSize: 14, fontWeight: "700" },
   bioHint: { color: "rgba(255,255,255,0.44)", fontSize: 12 },
+  consentScroll: { position: "absolute", top: 135, bottom: 30, left: 22, right: 22, zIndex: 9 },
+  consentContent: { flexGrow: 1, justifyContent: "center", paddingVertical: 20 },
   reticleLayer: {
     position: "absolute",
     top: "30%",
@@ -1369,7 +1223,7 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
   },
   processingLayer: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     justifyContent: "center",
     alignItems: "center",
     zIndex: 8,
@@ -1611,13 +1465,13 @@ const styles = StyleSheet.create({
   },
   quizQuestionLayer: { flex: 1 },
   quizCharcoalBg: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: "#0a0a0a",
   },
-  quizWave: { ...StyleSheet.absoluteFillObject },
+  quizWave: { ...StyleSheet.absoluteFill },
 
   quizSynthesisCanvas: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: "#f5f4ed",
     zIndex: 1,
   },

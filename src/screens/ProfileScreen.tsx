@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from "react";
 import {
     ActivityIndicator,
-    Alert,
     Image,
+    KeyboardAvoidingView,
     Linking,
-    Pressable,
+    Platform,
     ScrollView,
     StyleSheet,
     Text,
@@ -27,9 +27,7 @@ import Animated, {
 } from "react-native-reanimated";
 import {
     deleteCurrentAccount,
-    getNotificationPreference,
     loadCurrentProfile,
-    persistNotificationPreference,
     persistProfileEmail,
     persistProfileName,
     persistProfilePhotoUrl,
@@ -37,6 +35,9 @@ import {
     signOutCurrentAccount,
 } from "../lib/firebase/bootstrap";
 import { firebaseErrorMessage } from "../lib/firebase/errors";
+import SwipeAction from "../components/SwipeAction";
+import AiConsent, { AiConsentNotice } from "../components/AiConsent";
+import { useAiConsent } from "../lib/ai/useAiConsent";
 import { colors } from "../theme/colors";
 import { hapticLight } from "../utils/haptics";
 
@@ -74,7 +75,6 @@ export default function ProfileScreen({
   const [emailDraft, setEmailDraft] = useState("");
   const [currentPassword, setCurrentPassword] = useState("");
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
-  const [preference, setPreference] = useState<"later" | "sure" | undefined>();
   const [editing, setEditing] = useState(false);
   const [editingEmail, setEditingEmail] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -84,6 +84,7 @@ export default function ProfileScreen({
   const [showPhotoOptions, setShowPhotoOptions] = useState(false);
   const [showDeleteReauth, setShowDeleteReauth] = useState(false);
   const [deletePassword, setDeletePassword] = useState("");
+  const aiConsent = useAiConsent();
   const blobProgress = useSharedValue(0);
 
   useEffect(() => {
@@ -96,14 +97,13 @@ export default function ProfileScreen({
       true,
     );
     let mounted = true;
-    void Promise.all([loadCurrentProfile(), getNotificationPreference()])
-      .then(([profile, savedPreference]) => {
+    void loadCurrentProfile()
+      .then((profile) => {
         if (!mounted) return;
         setName(profile?.displayName ?? "");
         setEmail(profile?.email ?? "");
         setEmailDraft(profile?.email ?? "");
         setPhotoUrl(profile?.photoUrl ?? null);
-        setPreference(savedPreference);
       })
       .catch((error) => {
         if (mounted) setMessage(firebaseErrorMessage(error));
@@ -166,14 +166,13 @@ export default function ProfileScreen({
   const logout = async () => {
     setSaving(true);
     setMessage(null);
-    onLogout();
     try {
       await signOutCurrentAccount();
+      onLogout();
     } catch (error) {
-      console.warn(
-        "Logout could not be finalized:",
-        firebaseErrorMessage(error),
-      );
+      setMessage(firebaseErrorMessage(error));
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -225,36 +224,10 @@ export default function ProfileScreen({
     }
   }
 
-  const changeNotificationPreference = async (next: "later" | "sure") => {
-    setSaving(true);
+  const confirmDelete = () => {
     setMessage(null);
-    try {
-      await persistNotificationPreference(next);
-      setPreference(next);
-      hapticLight();
-    } catch (error) {
-      setMessage(firebaseErrorMessage(error));
-    } finally {
-      setSaving(false);
-    }
+    setShowDeleteReauth(true);
   };
-
-  const confirmDelete = () =>
-    Alert.alert(
-      "delete your account?",
-      "This permanently deletes your profile, preferences, sessions, metrics, devices, and saved data.",
-      [
-        { text: "cancel", style: "cancel" },
-        {
-          text: "delete permanently",
-          style: "destructive",
-          onPress: () => {
-            setMessage(null);
-            setShowDeleteReauth(true);
-          },
-        },
-      ],
-    );
 
   const deleteAccount = async () => {
     setSaving(true);
@@ -274,12 +247,24 @@ export default function ProfileScreen({
     <Animated.View entering={FadeIn.duration(460)} style={styles.container}>
       {showDeleteReauth && (
         <View style={styles.deleteReauthOverlay}>
+          <KeyboardAvoidingView
+            style={styles.keyboard}
+            behavior={Platform.OS === "ios" ? "padding" : "height"}
+          >
+          <ScrollView
+            contentContainerStyle={styles.deleteReauthContent}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+            alwaysBounceVertical
+          >
           <View style={styles.deleteReauthPanel}>
             <Text style={styles.deleteReauthTitle}>confirm deletion.</Text>
             <Text style={styles.deleteReauthText}>
-              Enter your current password to securely delete this account.
+              This permanently deletes your profile and saved data. Enter your
+              current password to confirm.
             </Text>
             <TextInput
+              accessibilityLabel="Current password for account deletion"
               value={deletePassword}
               onChangeText={setDeletePassword}
               secureTextEntry
@@ -288,28 +273,32 @@ export default function ProfileScreen({
               placeholderTextColor={colors.white50}
               style={styles.deletePasswordInput}
             />
+            {message && <Text style={styles.message}>{message}</Text>}
             <View style={styles.deleteReauthActions}>
-              <Pressable
-                onPress={() => {
+              <SwipeAction
+                label="cancel"
+                onActivate={() => {
                   setDeletePassword("");
                   setShowDeleteReauth(false);
                 }}
                 disabled={saving}
-              >
-                <Text style={styles.cancelText}>cancel.</Text>
-              </Pressable>
-              <Pressable onPress={() => void deleteAccount()} disabled={saving}>
-                <Text style={styles.deleteText}>
-                  {saving ? "deleting..." : "delete permanently"}
-                </Text>
-              </Pressable>
+              />
+              <SwipeAction label={saving ? "deleting..." : "delete permanently"} onActivate={() => void deleteAccount()} disabled={saving} />
             </View>
           </View>
+          </ScrollView>
+          </KeyboardAvoidingView>
         </View>
       )}
+      <KeyboardAvoidingView
+        style={styles.keyboard}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+      >
       <ScrollView
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        alwaysBounceVertical
       >
         <Text style={styles.eyebrow}>your profile</Text>
         <View style={styles.identity}>
@@ -336,10 +325,8 @@ export default function ProfileScreen({
               <Text style={styles.photoOptionsTitle}>choose your image</Text>
               <View style={styles.photoChoices}>
                 {PHOTO_OPTIONS.map((option) => (
-                  <Pressable
+                  <View
                     key={option.id}
-                    onPress={() => void choosePhoto(option.uri)}
-                    disabled={saving}
                     style={styles.photoChoice}
                   >
                     <Image
@@ -347,7 +334,8 @@ export default function ProfileScreen({
                       style={styles.choiceImage}
                     />
                     <Text style={styles.choiceLabel}>{option.label}</Text>
-                  </Pressable>
+                    <SwipeAction label={`choose ${option.label}`} onActivate={() => void choosePhoto(option.uri)} disabled={saving} />
+                  </View>
                 ))}
               </View>
             </View>
@@ -364,11 +352,7 @@ export default function ProfileScreen({
                 placeholderTextColor={colors.white40}
                 style={styles.nameInput}
               />
-              <Pressable onPress={() => void saveName()} disabled={saving}>
-                <Text style={styles.saveText}>
-                  {saving ? "saving..." : "save."}
-                </Text>
-              </Pressable>
+              <SwipeAction label={saving ? "saving..." : "save name"} onActivate={() => void saveName()} disabled={saving} />
             </View>
           ) : (
             <Text style={styles.nameText}>
@@ -376,9 +360,7 @@ export default function ProfileScreen({
             </Text>
           )}
           {!editing && (
-            <Pressable onPress={() => setEditing(true)}>
-              <Text style={styles.editNameText}>edit name →</Text>
-            </Pressable>
+            <SwipeAction label="edit name" onActivate={() => setEditing(true)} />
           )}
           <View style={styles.emailBlock}>
             <Text style={styles.emailLabel}>email</Text>
@@ -389,6 +371,7 @@ export default function ProfileScreen({
                   onChangeText={setEmailDraft}
                   autoCapitalize="none"
                   keyboardType="email-address"
+                  returnKeyType="done"
                   placeholder="your email"
                   placeholderTextColor={colors.white40}
                   style={styles.emailInput}
@@ -402,17 +385,8 @@ export default function ProfileScreen({
                   style={styles.emailInput}
                 />
                 <View style={styles.emailActions}>
-                  <Pressable onPress={() => void saveEmail()} disabled={saving}>
-                    <Text style={styles.saveText}>
-                      {saving ? "saving..." : "save email."}
-                    </Text>
-                  </Pressable>
-                  <Pressable
-                    onPress={() => setEditingEmail(false)}
-                    disabled={saving}
-                  >
-                    <Text style={styles.cancelText}>cancel.</Text>
-                  </Pressable>
+                  <SwipeAction label={saving ? "saving..." : "save email"} onActivate={() => void saveEmail()} disabled={saving} />
+                  <SwipeAction label="cancel" onActivate={() => setEditingEmail(false)} disabled={saving} />
                 </View>
               </View>
             ) : (
@@ -420,76 +394,62 @@ export default function ProfileScreen({
                 <Text style={styles.emailText}>
                   {email || "no email connected"}
                 </Text>
-                <Pressable onPress={() => setEditingEmail(true)}>
-                  <Text style={styles.editEmailText}>edit →</Text>
-                </Pressable>
+                <SwipeAction label="edit email" onActivate={() => setEditingEmail(true)} />
               </View>
             )}
           </View>
         </View>
-        {message && <Text style={styles.message}>{message}</Text>}
+        {!showDeleteReauth && message && <Text style={styles.message}>{message}</Text>}
         <View style={styles.sectionList}>
+          <View style={styles.sectionItem}>
+            <SwipeAction
+              label={`${expanded === "ai" ? "close" : "open"} AI agreement`}
+              onActivate={() => setExpanded(expanded === "ai" ? null : "ai")}
+            />
+            {expanded === "ai" && (
+              <View style={styles.aiAgreement}>
+                {aiConsent.status === "loading" && <Text style={styles.sectionContent}>Checking AI agreement...</Text>}
+                {aiConsent.status === "agreed" && (
+                  <>
+                    <Text style={styles.sectionContent}>AI agreement active for this account.</Text>
+                    <AiConsentNotice />
+                    <SwipeAction label="withdraw AI agreement" disabled={aiConsent.saving} onActivate={() => void aiConsent.change(false)} />
+                  </>
+                )}
+                {aiConsent.status === "not-agreed" && (
+                  <AiConsent disabled={aiConsent.saving} onAgree={() => void aiConsent.change(true)} />
+                )}
+                {!!aiConsent.error && <Text style={styles.message}>{aiConsent.error}</Text>}
+                {aiConsent.status === "error" && <SwipeAction label="retry checking AI agreement" onActivate={() => void aiConsent.refresh()} />}
+              </View>
+            )}
+          </View>
           {Object.entries(sections).map(([key, value]) => (
             <View key={key} style={styles.sectionItem}>
-              <Pressable
-                onPress={() => {
+              <SwipeAction
+                label={`${expanded === key ? "close" : "open"} ${key}`}
+                onActivate={() => {
                   setExpanded(expanded === key ? null : key);
                   hapticLight();
                 }}
-                style={styles.sectionButton}
-              >
-                <Text style={styles.sectionLabel}>{key}.</Text>
-                <Text style={styles.sectionMark}>
-                  {expanded === key ? "−" : "+"}
-                </Text>
-              </Pressable>
+              />
               {expanded === key && (
                 <Text style={styles.sectionContent}>{value}</Text>
               )}
               {key === "support" && expanded === key && (
-                <Pressable
-                  onPress={() =>
+                <SwipeAction
+                  label="email support"
+                  onActivate={() =>
                     void Linking.openURL("mailto:terminal@kenetic.app")
                   }
-                >
-                  <Text style={styles.supportLink}>email support →</Text>
-                </Pressable>
+                />
               )}
             </View>
           ))}
         </View>
-        <View style={styles.notificationSection}>
-          <Text style={styles.sectionLabel}>push notifications.</Text>
-          <Text style={styles.sectionContentLeft}>
-            Change how kenetic keeps you in the loop.
-          </Text>
-          <View style={styles.preferenceRow}>
-            {(["sure", "later"] as const).map((option) => (
-              <Pressable
-                key={option}
-                onPress={() => void changeNotificationPreference(option)}
-                disabled={saving}
-                style={[
-                  styles.preference,
-                  preference === option && styles.preferenceActive,
-                ]}
-              >
-                <Text style={styles.preferenceText}>{option}</Text>
-              </Pressable>
-            ))}
-          </View>
-        </View>
-        <Pressable
-          onPress={confirmDelete}
-          disabled={saving}
-          style={styles.deleteButton}
-        >
-          <Text style={styles.deleteText}>delete account.</Text>
-        </Pressable>
+        <SwipeAction label="delete account" onActivate={confirmDelete} disabled={saving} />
         <View style={styles.footer}>
-          <Pressable onPress={onBack}>
-            <Text style={styles.footerLink}> dashboard.</Text>
-          </Pressable>
+          <SwipeAction label="dashboard" onActivate={onBack} />
           <GestureDetector gesture={logoutGesture}>
             <Animated.View style={logoutStyle}>
               <Text style={styles.logoutText}>logout.</Text>
@@ -498,12 +458,14 @@ export default function ProfileScreen({
           </GestureDetector>
         </View>
       </ScrollView>
+      </KeyboardAvoidingView>
     </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bgDark },
+  keyboard: { flex: 1 },
   content: { padding: 28, paddingTop: 72, paddingBottom: 56 },
   eyebrow: {
     color: colors.orange,
@@ -662,6 +624,7 @@ const styles = StyleSheet.create({
   },
   message: { color: colors.rose, fontSize: 12, lineHeight: 18, marginTop: 20 },
   sectionList: { marginTop: 58, gap: 18 },
+  aiAgreement: { gap: 12, marginTop: 12 },
   sectionItem: {
     borderBottomWidth: 1,
     borderBottomColor: colors.white10,
@@ -694,41 +657,13 @@ const styles = StyleSheet.create({
     marginTop: 12,
     textTransform: "uppercase",
   },
-  notificationSection: {
-    marginTop: 42,
-    paddingTop: 24,
-    borderTopWidth: 1,
-    borderTopColor: colors.white10,
-  },
-  sectionContentLeft: {
-    color: colors.white50,
-    fontSize: 14,
-    lineHeight: 21,
-    marginTop: 8,
-  },
-  preferenceRow: { flexDirection: "row", gap: 10, marginTop: 18 },
-  preference: {
-    borderWidth: 1,
-    borderColor: colors.white20,
-    borderRadius: 999,
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-  },
-  preferenceActive: {
-    borderColor: colors.green,
-    backgroundColor: "rgba(22,163,74,0.16)",
-  },
-  preferenceText: {
-    color: colors.white,
-    fontSize: 13,
-    fontWeight: "700",
-    textTransform: "uppercase",
-    letterSpacing: 1,
-  },
   deleteReauthOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     zIndex: 20,
     backgroundColor: "rgba(0,0,0,0.72)",
+  },
+  deleteReauthContent: {
+    flexGrow: 1,
     alignItems: "center",
     justifyContent: "center",
     padding: 24,

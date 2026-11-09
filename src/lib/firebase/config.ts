@@ -2,7 +2,6 @@ const requiredEnv = {
   apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY,
   authDomain: process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN,
   projectId: process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID,
-  storageBucket: process.env.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET,
   messagingSenderId: process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
   appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID,
 } as const;
@@ -19,12 +18,13 @@ export const firebaseConfig = {
   apiKey: requireEnv("apiKey", requiredEnv.apiKey),
   authDomain: requireEnv("authDomain", requiredEnv.authDomain),
   projectId: requireEnv("projectId", requiredEnv.projectId),
-  storageBucket: requireEnv("storageBucket", requiredEnv.storageBucket),
   messagingSenderId: requireEnv(
     "messagingSenderId",
     requiredEnv.messagingSenderId,
   ),
   appId: requireEnv("appId", requiredEnv.appId),
+  storageBucket:
+    process.env.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET?.trim() || undefined,
 };
 
 export const googlePlacesApiKey =

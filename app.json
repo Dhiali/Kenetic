@@ -3,32 +3,40 @@
     "name": "kenetic",
     "slug": "kenetic",
     "version": "1.0.0",
+    "icon": "./assets/images/kenetic-icon.png",
+    "platforms": [
+      "ios",
+      "android"
+    ],
     "orientation": "portrait",
     "scheme": "kenetic",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#0a0a0a",
     "splash": {
-      "backgroundColor": "#0a0a0a"
+      "backgroundColor": "#0a0a0a",
+      "image": "./assets/images/kenetic-icon.png",
+      "resizeMode": "contain"
     },
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "bundleIdentifier": "com.dhiali.kenetic",
       "usesAppleSignIn": true,
       "supportsTablet": false,
       "infoPlist": {
         "NSCameraUsageDescription": "kenetic uses your camera to identify natural patterns during Outdoors sessions.",
-        "NSMicrophoneUsageDescription": "kenetic uses your microphone to identify ambient nature sounds during Outdoors sessions.",
         "NSLocationWhenInUseUsageDescription": "kenetic uses your location to find nearby trails, waters, and natural sanctuaries."
       }
     },
     "android": {
       "package": "com.dhiali.kenetic",
       "adaptiveIcon": {
+        "foregroundImage": "./assets/images/kenetic-icon.png",
         "backgroundColor": "#0a0a0a"
       },
       "permissions": [
         "CAMERA",
-        "RECORD_AUDIO",
         "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION"
       ]
@@ -46,7 +54,8 @@
         "expo-camera",
         {
           "cameraPermission": "kenetic uses your camera to identify natural patterns during Outdoors sessions.",
-          "microphonePermission": "kenetic uses your microphone to identify ambient nature sounds during Outdoors sessions."
+          "microphonePermission": false,
+          "recordAudioAndroid": false
         }
       ],
       [
@@ -54,7 +63,8 @@
         {
           "locationWhenInUsePermission": "kenetic uses your location to find nearby trails, waters, and natural sanctuaries."
         }
-      ]
+      ],
+      "expo-status-bar"
     ]
   }
 }

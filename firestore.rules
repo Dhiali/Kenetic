@@ -49,11 +49,14 @@ service cloud.firestore {
           || request.resource.data.termsAccepted is bool)
         && (!('termsAcceptedAt' in request.resource.data)
           || request.resource.data.termsAcceptedAt is timestamp)
+        && (!('aiConsentVersion' in request.resource.data)
+          || request.resource.data.aiConsentVersion in ['v1', 'withdrawn'])
         && validNotificationPreference();
     }
 
     function validTermsUpdate() {
-      return resource.data.termsAccepted != true
+      return !('termsAccepted' in resource.data)
+        || resource.data.termsAccepted != true
         || (request.resource.data.termsAccepted == true
           && request.resource.data.termsAcceptedAt == resource.data.termsAcceptedAt);
     }
@@ -160,7 +163,7 @@ service cloud.firestore {
           && (!('mode' in request.resource.data)
             || request.resource.data.mode in ['visual', 'acoustic'])
           && (!('engine' in request.resource.data)
-            || request.resource.data.engine in ['deterministic-v1'])
+            || request.resource.data.engine in ['deterministic-v1', 'gemini-v1'])
           && (!('scanSessionId' in request.resource.data)
             || request.resource.data.scanSessionId is string)
           && (!('matchScore' in request.resource.data)

@@ -1,6 +1,6 @@
 import { BlurView } from "expo-blur";
 import * as Haptics from "expo-haptics";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
@@ -16,6 +16,7 @@ import Animated, {
   withSpring,
   withTiming,
 } from "react-native-reanimated";
+import { firebaseErrorMessage } from "../lib/firebase/errors";
 
 const triggerImpact = (style: Haptics.ImpactFeedbackStyle) => {
   Haptics.impactAsync(style).catch(() => undefined);
@@ -24,9 +25,27 @@ const triggerImpact = (style: Haptics.ImpactFeedbackStyle) => {
 export default function FinishedScreen({
   onComplete,
 }: {
-  onComplete: () => void;
+  onComplete: () => Promise<void>;
 }) {
   const [isSnapped, setIsSnapped] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const completed = useRef(false);
+  const finish = async () => {
+    if (completed.current) return;
+    completed.current = true;
+    setIsSnapped(true);
+    setError(null);
+    try {
+      await onComplete();
+    } catch (saveError) {
+      completed.current = false;
+      setIsSnapped(false);
+      setError(firebaseErrorMessage(saveError));
+      dragTranslateX.value = withSpring(0);
+      dragTranslateY.value = withSpring(150);
+      textColor.value = "#16a34a";
+    }
+  };
 
   // Drag physics states
   const dragTranslateY = useSharedValue(150); // Starts 150px below the target
@@ -70,7 +89,7 @@ export default function FinishedScreen({
         dragTranslateY.value = withSpring(0, { damping: 15, stiffness: 300 });
         textColor.value = "#ffffff"; // Fill state (turns white)
 
-        runOnJS(onComplete)();
+        runOnJS(finish)();
       } else {
         // SNAP BACK TO START
         dragTranslateX.value = withSpring(0, { damping: 12, stiffness: 150 });
@@ -87,8 +106,8 @@ export default function FinishedScreen({
       { translateX: dragTranslateX.value },
       { translateY: dragTranslateY.value },
     ],
-    color: textColor.value,
   }));
+  const activeTextColor = useAnimatedStyle(() => ({ color: textColor.value }));
 
   // Morphing Splash Gradient Style
   const gateBlobAnimatedStyle = useAnimatedStyle(() => {
@@ -148,7 +167,7 @@ export default function FinishedScreen({
       <BlurView
         intensity={100}
         tint="dark"
-        style={StyleSheet.absoluteFillObject}
+        style={StyleSheet.absoluteFill}
       />
 
       {/* Text Wrapper guarantees absolute pixel-perfect overlap */}
@@ -159,12 +178,27 @@ export default function FinishedScreen({
         {/* 4. Draggable Active Text (Active puzzle piece) */}
         <GestureDetector gesture={dragGesture}>
           {/* We use hitSlop so it's easy to grab without messing up the visual dimensions */}
-          <Animated.Text style={[styles.activeText, draggableStyle]}>
-            finished
-          </Animated.Text>
+          <Animated.View
+            accessible
+            accessibilityRole="adjustable"
+            accessibilityLabel="Complete onboarding"
+            accessibilityHint="Activate to finish and continue."
+            accessibilityState={{ disabled: isSnapped }}
+            accessibilityActions={[{ name: "activate", label: "Complete onboarding" }]}
+            onAccessibilityAction={(event) => {
+              if (event.nativeEvent.actionName === "activate") finish();
+            }}
+            onAccessibilityTap={finish}
+            style={[styles.activePosition, draggableStyle]}
+          >
+            <Animated.Text style={[styles.activeText, activeTextColor]}>
+              finished
+            </Animated.Text>
+          </Animated.View>
         </GestureDetector>
       </View>
       <Text style={styles.dragInstruction}>drag and drop to complete</Text>
+      {error && <Text accessibilityLiveRegion="polite" style={styles.error}>{error}</Text>}
     </Animated.View>
   );
 }
@@ -194,8 +228,10 @@ const styles = StyleSheet.create({
     color: "rgba(255, 255, 255, 0.15)", // Muted hollow outline
     textTransform: "lowercase",
   },
-  activeText: {
+  activePosition: {
     position: "absolute",
+  },
+  activeText: {
     fontSize: 56,
     fontWeight: "900",
     letterSpacing: -2,
@@ -212,6 +248,13 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     textAlign: "center",
     textTransform: "uppercase",
+  },
+  error: {
+    position: "absolute",
+    bottom: 112,
+    marginHorizontal: 28,
+    color: "#ffb4a8",
+    textAlign: "center",
   },
   wipeCircle: {
     position: "absolute",

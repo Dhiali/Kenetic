@@ -1,0 +1,17 @@
+name = "kenetic-ai"
+main = "src/index.mjs"
+compatibility_date = "2026-11-01"
+
+[vars]
+# Set this to the Firebase project ID used by the app before deployment.
+FIREBASE_PROJECT_ID = "kenetic-ea6d7"
+# Comma-separated ISO country codes, limited to regions where unpaid Gemini use is permitted.
+ALLOWED_COUNTRIES = "ZA"
+
+[[durable_objects.bindings]]
+name = "QUOTA"
+class_name = "DailyQuota"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["DailyQuota"]

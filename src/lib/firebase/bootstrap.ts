@@ -20,16 +20,24 @@ import {
     createDashboardSelection,
     createFocusFeatureLaunch,
     createOutdoorFeatureLaunch,
+    createSavedPlace,
     createQuizHistory,
     createScanHistory,
     createUserProfile,
+    deleteChallengeProgress,
+    deleteSavedPlace,
     deleteUserData,
     getBreatheDashboardMetrics,
+    getAnsweredQuizQuestionIds,
+    getChallengeProgress,
     getFocusDashboardMetrics,
     getOutdoorDashboardMetrics,
     getQuizQueue,
     getUserProfile,
+    hasInitialIntention,
     markOnboardingComplete,
+    listSavedPlaces,
+    renameSavedPlace,
     saveChallengeProgress,
     saveInitialIntention,
     saveNotificationPreference,
@@ -51,8 +59,9 @@ export async function bootstrapAnonymousUser() {
   if (!profile) {
     await createUserProfile(user.uid, {
       onboardingCompleted: false,
-      email: user.email ?? undefined,
-      authProvider: "anonymous",
+      ...(user.email ? { email: user.email } : {}),
+      ...(user.displayName ? { displayName: user.displayName } : {}),
+      authProvider: user.isAnonymous ? "anonymous" : (user.providerData[0]?.providerId ?? "password"),
     });
   }
 
@@ -61,7 +70,11 @@ export async function bootstrapAnonymousUser() {
 
 export async function restoreSignedInAccount() {
   const user = await bootstrapAnonymousUser();
-  return user.isAnonymous ? null : user;
+  if (user.isAnonymous) return "FORK" as const;
+  const profile = await getUserProfile(user.uid);
+  if (!profile) throw new Error("Your profile could not be loaded. Please try again.");
+  if (profile.onboardingCompleted) return "DASHBOARD" as const;
+  return (await hasInitialIntention(user.uid)) ? "FOG" as const : "CAROUSEL" as const;
 }
 
 export async function persistOnboardingCompletion() {
@@ -170,6 +183,11 @@ export async function deleteCurrentAccount() {
   if (!user) throw new Error("No signed-in account was found.");
 
   const cleanupCompleted = await deleteUserData(user.uid);
+  if (!cleanupCompleted) {
+    throw new Error(
+      "Some account data could not be deleted. Your account is still active; please try again.",
+    );
+  }
   await deleteCurrentUser();
   return { cleanupCompleted };
 }
@@ -223,7 +241,7 @@ export async function registerProviderAccount(
   if (resolvedName) await updateCurrentUserProfile(resolvedName);
   await saveRegisteredUserProfile(credential.user.uid, {
     displayName: resolvedName,
-    email: email || credential.user.email || undefined,
+    ...((email || credential.user.email) ? { email: email || credential.user.email || "" } : {}),
     authProvider: provider === "google" ? "google.com" : "apple.com",
     onboardingCompleted: false,
   });
@@ -259,7 +277,6 @@ export async function startFocusTether(
   const session = await startSession(user.uid, "focus", {
     mode: "get-shit-done",
     platform,
-    tetherSeconds: 120,
     plannedMinutes,
   });
   return session.id;
@@ -274,13 +291,13 @@ export async function finishFocusTether(
   if (completed) {
     await completeSession(user.uid, sessionId, durationSeconds, {
       mode: "get-shit-done",
-      handoffSeconds: 120,
+      handoffCompleted: true,
       completionReason: "session-finished",
     });
   } else {
     await abandonSession(user.uid, sessionId, {
       mode: "get-shit-done",
-      reason: "tether-expired",
+      reason: "session-left",
     });
   }
 }
@@ -302,7 +319,11 @@ export async function loadOutdoorDashboardMetrics() {
 
 export async function loadOutdoorQuizQueue() {
   const user = await ensureAnonymousUser();
-  return getQuizQueue(user.uid);
+  const [discoveries, answeredIds] = await Promise.all([
+    getQuizQueue(user.uid),
+    getAnsweredQuizQuestionIds(user.uid),
+  ]);
+  return { discoveries, answeredIds };
 }
 
 export async function persistBreatheExerciseLaunch(
@@ -321,7 +342,7 @@ export async function persistOutdoorScan(scan: {
   somaticPrompt?: string;
   includeInDailyQuizzes?: boolean;
   mode?: "visual" | "acoustic";
-  engine?: "deterministic-v1";
+  engine?: "deterministic-v1" | "gemini-v1";
   scanSessionId?: string;
   matchScore?: number;
   capturedAssetUri?: string;
@@ -385,10 +406,28 @@ export async function persistOutdoorChallenge(
   const user = await ensureAnonymousUser();
   await saveChallengeProgress(user.uid, challengeId, {
     status,
-    metadata,
+    ...(metadata ? { metadata } : {}),
     ...(status === "started" ? { startedAt: new Date() } : {}),
     ...(status === "completed" ? { completedAt: new Date() } : {}),
   });
+}
+
+export async function loadTodayChallenge(day: string) {
+  const user = await ensureAnonymousUser();
+  const record = await getChallengeProgress(user.uid, `daily-${day}`);
+  return record?.status ?? "available";
+}
+
+export async function updateTodayChallenge(
+  day: string,
+  status: "started" | "completed",
+) {
+  await persistOutdoorChallenge(`daily-${day}`, status);
+}
+
+export async function clearTodayChallenge(day: string) {
+  const user = await ensureAnonymousUser();
+  await deleteChallengeProgress(user.uid, `daily-${day}`);
 }
 
 export async function persistOutdoorPlace(place: {
@@ -401,6 +440,33 @@ export async function persistOutdoorPlace(place: {
 }) {
   const user = await ensureAnonymousUser();
   await savePlace(user.uid, place.placeId, place);
+}
+
+export async function loadSavedPlaces() {
+  const user = await ensureAnonymousUser();
+  return listSavedPlaces(user.uid);
+}
+
+export async function addSavedPlace(name: string, address?: string) {
+  const normalizedName = name.trim();
+  if (!normalizedName) throw new Error("Enter a name for your place.");
+  const user = await ensureAnonymousUser();
+  await createSavedPlace(user.uid, {
+    name: normalizedName,
+    ...(address?.trim() ? { address: address.trim() } : {}),
+  });
+}
+
+export async function changeSavedPlaceName(placeId: string, name: string) {
+  const normalizedName = name.trim();
+  if (!normalizedName) throw new Error("Enter a name for your place.");
+  const user = await ensureAnonymousUser();
+  await renameSavedPlace(user.uid, placeId, normalizedName);
+}
+
+export async function removeSavedPlace(placeId: string) {
+  const user = await ensureAnonymousUser();
+  await deleteSavedPlace(user.uid, placeId);
 }
 
 export async function persistFocusFeatureLaunch(

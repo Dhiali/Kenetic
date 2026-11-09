@@ -1,7 +1,7 @@
 import { BlurView } from "expo-blur";
 import { LinearGradient } from "expo-linear-gradient";
-import React, { useEffect, useState } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import React, { useEffect, useRef, useState } from "react";
+import { StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
   FadeIn,
@@ -68,7 +68,20 @@ function DraggableGoal({
 
   return (
     <GestureDetector gesture={gesture}>
-      <Animated.View style={[styles.goalPill, animatedStyle]}>
+      <Animated.View
+        accessible
+        accessibilityRole="adjustable"
+        accessibilityLabel={`Choose ${label} as your intention`}
+        accessibilityHint="Activate to select this intention."
+        accessibilityState={{ disabled }}
+        accessibilityActions={[{ name: "activate", label: `Choose ${label}` }]}
+        onAccessibilityAction={(event) => {
+          if (!disabled && event.nativeEvent.actionName === "activate") onDrop(label);
+        }}
+        onAccessibilityTap={() => { if (!disabled) onDrop(label); }}
+        style={[styles.goalPill, animatedStyle]}
+      >
+        <Text style={styles.goalArrow}>↑</Text>
         <Text style={styles.goalText}>{label}</Text>
       </Animated.View>
     </GestureDetector>
@@ -82,6 +95,9 @@ export default function IntakeScreen({
 }) {
   const [droppedGoal, setDroppedGoal] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const saveInProgress = useRef(false);
+  const { height } = useWindowDimensions();
+  const compact = height < 700;
 
   const circleScale = useSharedValue(1);
   const circleOpacity = useSharedValue(0.15);
@@ -111,7 +127,8 @@ export default function IntakeScreen({
   }));
 
   const handleDrop = async (label: string) => {
-    if (droppedGoal) return;
+    if (saveInProgress.current) return;
+    saveInProgress.current = true;
 
     setDroppedGoal(label);
     setSaveError(null);
@@ -122,6 +139,7 @@ export default function IntakeScreen({
       await persistInitialIntention(label);
       setTimeout(onComplete, 600);
     } catch (error) {
+      saveInProgress.current = false;
       setDroppedGoal(null);
       setSaveError(firebaseErrorMessage(error));
       circleScale.value = withTiming(1, { duration: 300 });
@@ -135,7 +153,7 @@ export default function IntakeScreen({
       exiting={FadeOut.duration(400)}
       style={styles.container}
     >
-      <View style={styles.ambientGlow}>
+      <View pointerEvents="none" style={styles.ambientGlow}>
         <LinearGradient
           colors={[
             "rgba(22,163,74,0.54)",
@@ -150,7 +168,7 @@ export default function IntakeScreen({
         <BlurView intensity={30} tint="dark" style={styles.ambientBlur} />
       </View>
 
-      <View style={styles.header}>
+      <View style={[styles.header, compact && styles.headerCompact]}>
         <Text style={styles.eyebrow}>your first intention</Text>
         <Text style={styles.title}>
           {droppedGoal
@@ -158,16 +176,17 @@ export default function IntakeScreen({
             : "What demands\nyour focus?"}
         </Text>
         <Text style={styles.subtitle}>
-          Choose one thing to bring into the center of your day.
+          Drag one intention up toward the circle.
         </Text>
       </View>
 
-      <View style={styles.targetZone}>
+      <View style={[styles.targetZone, compact && styles.targetZoneCompact]}>
         <Animated.View style={[styles.glowHalo, circleStyle]} />
         <View style={styles.targetRing}>
           <View style={styles.targetCore}>
+            <Text style={styles.targetEyebrow}>YOUR INTENTION</Text>
             <Text style={styles.targetLabel}>
-              {droppedGoal ? droppedGoal.toLowerCase() : "place here"}
+              {droppedGoal ? droppedGoal.toLowerCase() : "drop here"}
             </Text>
           </View>
         </View>
@@ -176,7 +195,8 @@ export default function IntakeScreen({
       {saveError && <Text style={styles.error}>{saveError}</Text>}
 
       {!droppedGoal && (
-        <View style={styles.bottomArea}>
+        <View style={[styles.bottomArea, compact && styles.bottomAreaCompact]}>
+          <Text style={styles.hint}>CHOOSE ONE AND DROP IT INTO THE VOID</Text>
           <View style={styles.goalsContainer}>
             <DraggableGoal
               label="Deep work"
@@ -204,7 +224,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.bgDark,
-    paddingHorizontal: 28,
+    paddingHorizontal: 24,
     justifyContent: "space-between",
     overflow: "hidden",
   },
@@ -223,16 +243,19 @@ const styles = StyleSheet.create({
     opacity: 0.82,
   },
   ambientBlur: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     borderRadius: 250,
     opacity: 0.2,
   },
   header: {
-    paddingTop: 112,
+    paddingTop: 100,
     alignItems: "flex-start",
   },
+  headerCompact: {
+    paddingTop: 64,
+  },
   eyebrow: {
-    color: colors.orange,
+    color: "#ffad74",
     fontSize: 11,
     fontWeight: "800",
     letterSpacing: 2.2,
@@ -241,7 +264,7 @@ const styles = StyleSheet.create({
   },
   title: {
     width: "100%",
-    fontSize: 44,
+    fontSize: 42,
     lineHeight: 46,
     fontWeight: "900",
     letterSpacing: -2,
@@ -249,17 +272,20 @@ const styles = StyleSheet.create({
     textAlign: "left",
   },
   subtitle: {
-    color: colors.white50,
-    fontSize: 16,
-    lineHeight: 24,
-    marginTop: 18,
+    color: "#c5c5c5",
+    fontSize: 15,
+    lineHeight: 23,
+    marginTop: 14,
     maxWidth: 310,
   },
   targetZone: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    minHeight: 250,
+    minHeight: 210,
+  },
+  targetZoneCompact: {
+    minHeight: 180,
   },
   glowHalo: {
     position: "absolute",
@@ -270,39 +296,37 @@ const styles = StyleSheet.create({
     opacity: 0.24,
   },
   targetRing: {
-    width: 164,
-    height: 164,
-    borderRadius: 82,
+    width: 176,
+    height: 176,
+    borderRadius: 88,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.36)",
+    borderColor: "rgba(255,190,145,0.55)",
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(10,10,10,0.32)",
+    backgroundColor: "rgba(10,10,10,0.48)",
   },
   targetCore: {
-    width: 136,
-    height: 136,
-    borderRadius: 68,
+    width: 148,
+    height: 148,
+    borderRadius: 74,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.06)",
+    backgroundColor: "rgba(255,255,255,0.05)",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.12)",
   },
+  targetEyebrow: {
+    color: "#d4b7a5",
+    fontSize: 9,
+    fontWeight: "800",
+    letterSpacing: 1.4,
+    marginBottom: 8,
+  },
   targetLabel: {
     color: colors.white,
-    fontSize: 12,
+    fontSize: 18,
     fontWeight: "700",
-    letterSpacing: 1.4,
-    textTransform: "uppercase",
-  },
-  targetHint: {
-    color: colors.white40,
-    fontSize: 11,
-    fontWeight: "600",
-    letterSpacing: 1.8,
-    textTransform: "uppercase",
-    marginTop: 20,
+    textAlign: "center",
   },
   error: {
     color: colors.rose,
@@ -313,16 +337,20 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   bottomArea: {
-    paddingBottom: 42,
+    paddingBottom: 106,
     alignItems: "center",
+  },
+  bottomAreaCompact: {
+    paddingBottom: 65,
   },
   hint: {
     fontSize: 11,
     fontWeight: "600",
     letterSpacing: 2,
     textTransform: "uppercase",
-    color: colors.white50,
-    marginBottom: 14,
+    color: "#c5c5c5",
+    marginBottom: 18,
+    textAlign: "center",
   },
   goalsContainer: {
     flexDirection: "row",
@@ -333,16 +361,21 @@ const styles = StyleSheet.create({
   },
   goalPill: {
     flex: 1,
-    minHeight: 52,
-    paddingHorizontal: 10,
-    borderRadius: 28,
+    minHeight: 62,
+    paddingHorizontal: 6,
+    borderRadius: 20,
     borderWidth: 1,
     borderColor: colors.white20,
-    backgroundColor: "rgba(255,255,255,0.08)",
+    backgroundColor: "rgba(255,255,255,0.09)",
     alignItems: "center",
     justifyContent: "center",
     flexDirection: "row",
-    gap: 7,
+    gap: 5,
+  },
+  goalArrow: {
+    color: "#ffad74",
+    fontSize: 17,
+    fontWeight: "700",
   },
   goalText: {
     color: colors.white,

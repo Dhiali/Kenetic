@@ -1,17 +1,9 @@
-import * as AppleAuthentication from "expo-apple-authentication";
-import * as Google from "expo-auth-session/providers/google";
-import {
-    CryptoDigestAlgorithm,
-    digestStringAsync,
-    randomUUID,
-} from "expo-crypto";
-import { Apple, ChevronRight, Chrome } from "lucide-react-native";
-import React, { useEffect, useState } from "react";
+import { ChevronRight } from "lucide-react-native";
+import React, { useEffect, useRef, useState } from "react";
 import {
     ActivityIndicator,
     KeyboardAvoidingView,
     Platform,
-    Pressable,
     ScrollView,
     StyleSheet,
     Text,
@@ -31,15 +23,7 @@ import Animated, {
     withSpring,
     withTiming,
 } from "react-native-reanimated";
-import {
-    loginWithEmailAccount,
-    loginWithProviderAccount,
-} from "../lib/firebase/bootstrap";
-import {
-    googleAndroidClientId,
-    googleIosClientId,
-    googleWebClientId,
-} from "../lib/firebase/config";
+import { loginWithEmailAccount } from "../lib/firebase/bootstrap";
 import { firebaseErrorMessage } from "../lib/firebase/errors";
 import { colors } from "../theme/colors";
 import { hapticLight } from "../utils/haptics";
@@ -67,13 +51,15 @@ function PulseDot({ color, delay }: { color: string; delay: number }) {
   );
 }
 
+type LoginScreenProps = {
+  onComplete: () => Promise<void>;
+  onBack?: () => void;
+};
+
 export default function LoginScreen({
   onComplete,
   onBack,
-}: {
-  onComplete: () => void;
-  onBack?: () => void;
-}) {
+}: LoginScreenProps) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [errors, setErrors] = useState<{
@@ -82,38 +68,9 @@ export default function LoginScreen({
     form?: string;
   }>({});
   const [submitting, setSubmitting] = useState(false);
-  const [googleRequest, googleResponse, promptGoogle] = Google.useAuthRequest({
-    clientId: googleWebClientId ?? undefined,
-    androidClientId: googleAndroidClientId ?? undefined,
-    iosClientId: googleIosClientId ?? undefined,
-    webClientId: googleWebClientId ?? undefined,
-    selectAccount: true,
-  });
+  const emailSubmissionInProgress = useRef(false);
   const backX = useSharedValue(0);
   const submitX = useSharedValue(0);
-
-  useEffect(() => {
-    if (!googleResponse) return;
-    if (googleResponse.type === "cancel" || googleResponse.type === "dismiss") {
-      setSubmitting(false);
-      return;
-    }
-    if (googleResponse.type !== "success") {
-      setErrors({ form: "Google sign in could not be completed." });
-      setSubmitting(false);
-      return;
-    }
-    const token = googleResponse.authentication?.accessToken;
-    if (!token) {
-      setErrors({ form: "Google did not return an access token." });
-      setSubmitting(false);
-      return;
-    }
-    void loginWithProviderAccount("google", token)
-      .then(onComplete)
-      .catch((error) => setErrors({ form: firebaseErrorMessage(error) }))
-      .finally(() => setSubmitting(false));
-  }, [googleResponse, onComplete]);
 
   const validate = () => {
     const next: typeof errors = {};
@@ -127,70 +84,21 @@ export default function LoginScreen({
   };
 
   const signIn = async () => {
-    if (!validate() || submitting) {
+    if (emailSubmissionInProgress.current || submitting || !validate()) {
       submitX.value = withSpring(0);
       return;
     }
+    emailSubmissionInProgress.current = true;
     setSubmitting(true);
     hapticLight();
     try {
       await loginWithEmailAccount(email, password);
-      onComplete();
+      await onComplete();
     } catch (error) {
       setErrors({ form: firebaseErrorMessage(error) });
       submitX.value = withSpring(0);
     } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const startGoogle = async () => {
-    if (submitting) return;
-    if (!googleWebClientId && !googleAndroidClientId && !googleIosClientId) {
-      setErrors({ form: "Google sign in needs a configured OAuth client ID." });
-      return;
-    }
-    setErrors({});
-    setSubmitting(true);
-    hapticLight();
-    try {
-      await promptGoogle();
-    } catch (error) {
-      setErrors({ form: firebaseErrorMessage(error) });
-      setSubmitting(false);
-    }
-  };
-
-  const startApple = async () => {
-    if (submitting) return;
-    if (Platform.OS !== "ios") {
-      setErrors({ form: "Apple sign in is available on iPhone and iPad." });
-      return;
-    }
-    setErrors({});
-    setSubmitting(true);
-    hapticLight();
-    try {
-      const rawNonce = randomUUID();
-      const hashedNonce = await digestStringAsync(
-        CryptoDigestAlgorithm.SHA256,
-        rawNonce,
-      );
-      const credential = await AppleAuthentication.signInAsync({
-        nonce: hashedNonce,
-      });
-      if (!credential.identityToken)
-        throw new Error("Apple did not return a valid identity token.");
-      await loginWithProviderAccount(
-        "apple",
-        credential.identityToken,
-        rawNonce,
-      );
-      onComplete();
-    } catch (error) {
-      if ((error as { code?: string }).code !== "ERR_REQUEST_CANCELED")
-        setErrors({ form: firebaseErrorMessage(error) });
-    } finally {
+      emailSubmissionInProgress.current = false;
       setSubmitting(false);
     }
   };
@@ -235,13 +143,25 @@ export default function LoginScreen({
         <ScrollView
           contentContainerStyle={styles.content}
           keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          alwaysBounceVertical
           showsVerticalScrollIndicator={false}
         >
           {onBack && (
             <GestureDetector gesture={backGesture}>
-              <Animated.Text style={[styles.backLink, backStyle]}>
-                where to? →
-              </Animated.Text>
+              <Animated.View
+                accessible
+                accessibilityRole="adjustable"
+                accessibilityLabel="Back to account options"
+                accessibilityActions={[{ name: "activate", label: "Go back" }]}
+                onAccessibilityAction={(event) => {
+                  if (event.nativeEvent.actionName === "activate") onBack();
+                }}
+                onAccessibilityTap={onBack}
+                style={backStyle}
+              >
+                <Text style={styles.backLink}>where to? →</Text>
+              </Animated.View>
             </GestureDetector>
           )}
           <Text style={styles.title}>return.</Text>
@@ -251,6 +171,7 @@ export default function LoginScreen({
           </Text>
           <View style={styles.fields}>
             <TextInput
+              accessibilityLabel="Email"
               value={email}
               onChangeText={(value) => {
                 setEmail(value);
@@ -264,11 +185,13 @@ export default function LoginScreen({
               placeholder="email"
               placeholderTextColor={colors.gray400}
               keyboardType="email-address"
+              returnKeyType="done"
               autoCapitalize="none"
               style={styles.input}
             />
             {!!errors.email && <Text style={styles.error}>{errors.email}</Text>}
             <TextInput
+              accessibilityLabel="Password"
               value={password}
               onChangeText={(value) => {
                 setPassword(value);
@@ -288,24 +211,6 @@ export default function LoginScreen({
               <Text style={styles.error}>{errors.password}</Text>
             )}
           </View>
-          <View style={styles.socialButtons}>
-            <Pressable
-              onPress={() => void startGoogle()}
-              disabled={submitting}
-              style={styles.socialButton}
-            >
-              <Chrome color={colors.white} size={18} />
-              <Text style={styles.socialText}>continue with google</Text>
-            </Pressable>
-            <Pressable
-              onPress={() => void startApple()}
-              disabled={submitting}
-              style={styles.socialButton}
-            >
-              <Apple color={colors.white} size={18} />
-              <Text style={styles.socialText}>continue with apple</Text>
-            </Pressable>
-          </View>
           {!!errors.form && <Text style={styles.error}>{errors.form}</Text>}
           <View style={styles.bottom}>
             <Text style={styles.welcome}>welcome back</Text>
@@ -320,7 +225,19 @@ export default function LoginScreen({
                   <ChevronRight color={colors.white50} size={18} />
                 </View>
                 <GestureDetector gesture={submitGesture}>
-                  <Animated.View style={[styles.submitKnob, submitStyle]}>
+                  <Animated.View
+                    accessible
+                    accessibilityRole="adjustable"
+                    accessibilityLabel="Sign in"
+                    accessibilityHint="Activate to sign in with your email and password."
+                    accessibilityState={{ disabled: submitting }}
+                    accessibilityActions={[{ name: "activate", label: "Sign in" }]}
+                    onAccessibilityAction={(event) => {
+                      if (!submitting && event.nativeEvent.actionName === "activate") void signIn();
+                    }}
+                    onAccessibilityTap={() => { if (!submitting) void signIn(); }}
+                    style={[styles.submitKnob, submitStyle]}
+                  >
                     {submitting ? (
                       <ActivityIndicator color={colors.white} />
                     ) : (
@@ -374,20 +291,6 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   error: { color: colors.rose, fontSize: 12, lineHeight: 18, marginTop: -4 },
-  socialButtons: { gap: 10, marginTop: 28 },
-  socialButton: {
-    minHeight: 50,
-    borderWidth: 1,
-    borderColor: colors.white20,
-    borderRadius: 8,
-    paddingHorizontal: 16,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 10,
-    backgroundColor: "rgba(255,255,255,0.06)",
-  },
-  socialText: { color: colors.white, fontSize: 13, fontWeight: "700" },
   bottom: { paddingTop: 38, alignItems: "flex-start" },
   welcome: {
     color: colors.white50,

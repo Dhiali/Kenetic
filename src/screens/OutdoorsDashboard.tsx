@@ -2,7 +2,8 @@ import { BlurView } from "expo-blur";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import React, { useEffect } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ScrollView, StyleSheet, Text, View } from "react-native";
+import SwipeAction from "../components/SwipeAction";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
     Easing,
@@ -126,12 +127,12 @@ export default function OutdoorsDashboard({
           locations={[0, 0.48, 1]}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
-          style={StyleSheet.absoluteFillObject}
+          style={StyleSheet.absoluteFill}
         />
         <BlurView
           intensity={70}
           tint="dark"
-          style={StyleSheet.absoluteFillObject}
+          style={StyleSheet.absoluteFill}
         />
       </Animated.View>
       <ScrollView
@@ -152,7 +153,7 @@ export default function OutdoorsDashboard({
         <Animated.View style={[styles.metrics, metricsRevealStyle]}>
           <Metric
             value={`${metrics.speciesScanned}`}
-            label="species scanned in nature"
+            label="discoveries saved"
           />
           <Metric
             value={`${metrics.quizAttempts}`}
@@ -168,29 +169,25 @@ export default function OutdoorsDashboard({
           />
         </Animated.View>
         {metricsError && (
-          <Pressable onPress={retryMetrics} hitSlop={12}>
-            <Text style={styles.metricsError}>
-              Ledger unavailable. Tap to retry.
-            </Text>
-          </Pressable>
+          <SwipeAction label="Ledger unavailable. Retry" onActivate={retryMetrics} />
         )}
         <View style={styles.gateways}>
           <Gateway
-            title="Bio Radar AI."
-            label="visual & acoustic species scanner"
-            description="Point your camera or microphone at plants or animals to generate a designed breakdown card detailing what it is and its ecological significance."
+            title="Bio Radar."
+            label="photo nature discovery"
+            description="Use a photo to explore AI-suggested nature discoveries. Results are uncertain and not safety advice."
             onLaunch={onBioRadar}
           />
           <Gateway
             title="Curiosity Quizzes."
             label="adaptive knowledge retention"
-            description="Generated daily questions based directly on your Bio Radar scan history, turning your real-world discoveries into long-term environmental knowledge."
+            description="Explore daily general-nature questions and eligible older discovery cards."
             onLaunch={onCuriosity}
           />
           <Gateway
             title="Spot Finder."
             label="trails, waters & sanctuaries"
-            description="Discover nearby hiking trails, fishing spots and natural parks. Activate location-bound challenges when arriving at a spot to earn physical restoration badges and rewards."
+            description="Save places you find calming. Optional nearby search uses Google Places and requires separate configuration."
             onLaunch={onSpotFinder}
           />
           <Gateway

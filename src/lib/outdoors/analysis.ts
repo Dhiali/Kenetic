@@ -2,7 +2,6 @@ export type OutdoorAnalysisStatus = "unavailable" | "ready";
 
 export type OutdoorAnalysisInput = {
   imageUri?: string;
-  audioUri?: string;
 };
 
 export type OutdoorAnalysisResult = {

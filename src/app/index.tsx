@@ -687,12 +687,12 @@ function Dashboard({
       </View>
       {showBoundary && (
         <Animated.View
-          style={[StyleSheet.absoluteFillObject, boundaryOverlayStyle]}
+          style={[StyleSheet.absoluteFill, boundaryOverlayStyle]}
         >
           <BlurView
             intensity={42}
             tint="dark"
-            style={StyleSheet.absoluteFillObject}
+            style={StyleSheet.absoluteFill}
           />
           <Animated.View
             entering={SlideInDown.duration(520)}
@@ -869,7 +869,7 @@ function FeatureList({
             <Text style={styles.featureTitle}>{item.title}</Text>
             <Text style={[styles.eyebrow, { color: accent }]}>
               {item.title === "get shit done."
-                ? "sound tether & app lock"
+                ? "music & focus timer"
                 : "guided practice"}
             </Text>
             <Text style={styles.subtle}>{item.description}</Text>
@@ -978,12 +978,12 @@ function Focus({
             locations={[0, 0.48, 1]}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
-            style={StyleSheet.absoluteFillObject}
+            style={StyleSheet.absoluteFill}
           />
           <BlurView
             intensity={70}
             tint="dark"
-            style={StyleSheet.absoluteFillObject}
+            style={StyleSheet.absoluteFill}
           />
         </Animated.View>
 
@@ -1020,7 +1020,7 @@ function Focus({
             />
             <FocusMetric
               value={`${focusMetrics.handoffCompletedSessions}`}
-              label="two-minute handoffs completed"
+              label="music handoffs completed"
             />
           </View>
           {focusLaunchError && (
@@ -1029,8 +1029,8 @@ function Focus({
           <View style={styles.focusGateways}>
             <FocusGateway
               title="get shit done."
-              label="sound tether & app lock"
-              description="Connects Apple Music or Spotify. Activates background audio and automatically pauses playback if you stay actively on your phone for more than 2 minutes."
+              label="music & focus timer"
+              description="Open Apple Music or Spotify to choose your sound. Your focus timer starts when you return to Kenetic."
               auraExpand={auraExpand}
               onLaunch={() =>
                 void launchFocusFeature("get-shit-done", onGetShitDone)
@@ -1038,7 +1038,7 @@ function Focus({
             />
             <FocusGateway
               title="alien mode."
-              label="ai task deconstructor"
+              label="guided task reframing"
               description={
                 'Intercepts overwhelming tasks and prompts you with a "Beginner\'s Mind" question to reframe your perspective before the timer begins.'
               }
@@ -1161,7 +1161,7 @@ function Outdoors({ onBack }: { onBack: () => void }) {
         {
           title: "bio radar ai.",
           description:
-            "Scan a plant, animal, or sound and turn it into a field dossier.",
+            "Scan a plant or animal photo and turn it into an AI-assisted field dossier.",
         },
         {
           title: "curiosity quizzes.",
@@ -1323,7 +1323,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   auraGradient: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     borderRadius: 165,
     opacity: 0.9,
   },
@@ -1547,7 +1547,7 @@ const styles = StyleSheet.create({
     letterSpacing: -1,
   },
   wipe: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: "#e11d48",
     alignItems: "center",
     justifyContent: "center",

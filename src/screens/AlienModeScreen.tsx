@@ -30,7 +30,14 @@ import {
     finishAlienModeSession,
     startAlienModeSession,
 } from "../lib/firebase/bootstrap";
+import { ensureAnonymousUser } from "../lib/firebase/auth";
 import { firebaseErrorMessage } from "../lib/firebase/errors";
+import { makeTaskSteps } from "../lib/ai/client";
+import { useAiConsent } from "../lib/ai/useAiConsent";
+import { scopedSessionKey } from "../lib/focus/sessionStorage";
+import { createCompletionGate } from "../lib/focus/completionGate";
+import AiConsent from "../components/AiConsent";
+import AccessibleSwipeAction from "../components/SwipeAction";
 import { colors } from "../theme/colors";
 
 const ACTIVE_DEADLINE_KEY = "@kenetic/alien-mode-deadline";
@@ -44,51 +51,6 @@ const triggerAlienHaptic = (style: Haptics.ImpactFeedbackStyle) => {
   Haptics.impactAsync(style).catch(() => undefined);
 };
 
-const localReframe = (task: string) => {
-  const normalizedTask = task.trim();
-  const lowerTask = normalizedTask.toLowerCase();
-  const isAllergyConcern =
-    lowerTask.includes("allerg") ||
-    lowerTask.includes("peanut") ||
-    lowerTask.includes("nut") ||
-    lowerTask.includes("anaphyl");
-  const isProcrastinationConcern =
-    lowerTask.includes("procrast") ||
-    lowerTask.includes("putting it off") ||
-    lowerTask.includes("can't start") ||
-    lowerTask.includes("cannot start");
-
-  if (isAllergyConcern) {
-    return {
-      prompt:
-        "What is the safest immediate action before you eat or handle this food?",
-      microAction:
-        "Put the food aside, check its label, and ask a trusted healthcare professional if allergic.",
-    };
-  }
-
-  if (isProcrastinationConcern) {
-    return {
-      prompt:
-        "What is the smallest visible action that takes less than five minutes?",
-      microAction:
-        "Open the task and write down the single first step you can do now.",
-    };
-  }
-
-  const prompt = lowerTask.includes("email")
-    ? "What is the first person or message you need to place in front of you?"
-    : lowerTask.includes("report") || lowerTask.includes("document")
-      ? "If you had to teach this to an alien, what is the first physical object you need to touch?"
-      : lowerTask.includes("meeting") || lowerTask.includes("call")
-        ? "What is the smallest visible preparation that makes this meeting real?"
-        : "What is the absolute smallest edge piece of this puzzle?";
-  return {
-    prompt,
-    microAction: normalizedTask,
-  };
-};
-
 type Phase = "confession" | "interception" | "ritual" | "active" | "complete";
 
 export default function AlienModeScreen({ onBack }: { onBack: () => void }) {
@@ -97,11 +59,22 @@ export default function AlienModeScreen({ onBack }: { onBack: () => void }) {
   const [microAction, setMicroAction] = useState("");
   const [isolatedFocus, setIsolatedFocus] = useState("");
   const [prompt, setPrompt] = useState("");
+  const [steps, setSteps] = useState<string[]>([]);
+  const [generating, setGenerating] = useState(false);
+  const generatingRef = useRef(false);
+  const startingRef = useRef(false);
+  const [starting, setStarting] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [remaining, setRemaining] = useState(ACTIVE_SECONDS);
   const [error, setError] = useState<string | null>(null);
   const [finalizing, setFinalizing] = useState(false);
   const finalizingRef = useRef(false);
+  const completionGate = useRef(createCompletionGate()).current;
+  const [completionFailed, setCompletionFailed] = useState(false);
+  const keysRef = useRef<string[] | null>(null);
+  const [restoring, setRestoring] = useState(true);
+  const [restoreFailed, setRestoreFailed] = useState(false);
+  const aiConsent = useAiConsent();
   const blob = useSharedValue(0);
 
   useEffect(() => {
@@ -113,14 +86,30 @@ export default function AlienModeScreen({ onBack }: { onBack: () => void }) {
       -1,
       true,
     );
-    void restoreActiveSession();
-    return () => undefined;
+    let mounted = true;
+    void (async () => {
+      const user = await ensureAnonymousUser();
+      const keys = [ACTIVE_SESSION_KEY, ACTIVE_DEADLINE_KEY, TASK_KEY, MICRO_ACTION_KEY, PROMPT_KEY]
+        .map((key) => scopedSessionKey(key, user.uid));
+      if (!mounted) return;
+      keysRef.current = keys;
+      await restoreActiveSession(keys, () => mounted);
+      if (mounted) setRestoring(false);
+    })().catch((restoreError) => {
+      if (!mounted) return;
+      setRestoring(false);
+      setRestoreFailed(true);
+      setError(`Could not restore your focus session: ${firebaseErrorMessage(restoreError)} Return to Focus and try again.`);
+    });
+    return () => { mounted = false; };
   }, []);
 
   useEffect(() => {
     if (phase !== "active") return;
     const tick = () => {
-      void AsyncStorage.getItem(ACTIVE_DEADLINE_KEY).then((value) => {
+      const keys = keysRef.current;
+      if (!keys) return;
+      void AsyncStorage.getItem(keys[1]).then((value) => {
         if (!value) return;
         const next = Math.max(
           0,
@@ -128,7 +117,7 @@ export default function AlienModeScreen({ onBack }: { onBack: () => void }) {
         );
         setRemaining(next);
         if (next === 0) void completeActiveSession();
-      });
+      }).catch((readError) => setError(`Could not read the timer: ${firebaseErrorMessage(readError)}`));
     };
     tick();
     const timer = setInterval(tick, 1000);
@@ -137,7 +126,11 @@ export default function AlienModeScreen({ onBack }: { onBack: () => void }) {
 
   useEffect(() => {
     const handleAppState = (next: AppStateStatus) => {
-      if (next === "active" && phase === "active") void restoreActiveSession();
+      if (next === "active" && phase === "active" && keysRef.current) {
+        void restoreActiveSession(keysRef.current, () => true).catch((restoreError) =>
+          setError(`Could not restore your focus session: ${firebaseErrorMessage(restoreError)}`),
+        );
+      }
     };
     const subscription = AppState.addEventListener("change", handleAppState);
     return () => subscription.remove();
@@ -153,19 +146,33 @@ export default function AlienModeScreen({ onBack }: { onBack: () => void }) {
     borderRadius: interpolate(blob.value, [0, 1], [180, 120]),
   }));
 
-  const surrender = () => {
+  const surrender = async () => {
+    if (generatingRef.current) return;
     if (!task.trim()) {
       setError("Name the task you are ready to make smaller.");
       return;
     }
     setError(null);
-    const result = localReframe(task);
-    setPrompt(result.prompt);
-    setMicroAction(result.microAction);
-    setPhase("interception");
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(
-      () => undefined,
-    );
+    if (task.length > 1000) {
+      setError("Please keep your task under 1000 characters.");
+      return;
+    }
+    generatingRef.current = true;
+    setGenerating(true);
+    try {
+      const result = await makeTaskSteps(task.trim());
+      setSteps(result.steps);
+      setPrompt("Start with one small step.");
+      setMicroAction(result.steps[0]);
+      setPhase("interception");
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => undefined);
+    } catch (caught) {
+      setError(firebaseErrorMessage(caught));
+      void aiConsent.refresh();
+    } finally {
+      generatingRef.current = false;
+      setGenerating(false);
+    }
   };
 
   const isolate = () => {
@@ -178,6 +185,10 @@ export default function AlienModeScreen({ onBack }: { onBack: () => void }) {
   };
 
   const begin = async () => {
+    const keys = keysRef.current;
+    if (startingRef.current || !keys || restoreFailed) return;
+    startingRef.current = true;
+    setStarting(true);
     setError(null);
     try {
       const nextSessionId = await startAlienModeSession(
@@ -187,11 +198,11 @@ export default function AlienModeScreen({ onBack }: { onBack: () => void }) {
       );
       const deadline = Date.now() + ACTIVE_SECONDS * 1000;
       await AsyncStorage.multiSet([
-        [ACTIVE_SESSION_KEY, nextSessionId],
-        [ACTIVE_DEADLINE_KEY, String(deadline)],
-        [TASK_KEY, task.trim()],
-        [MICRO_ACTION_KEY, isolatedFocus.trim()],
-        [PROMPT_KEY, prompt.trim()],
+        [keys[0], nextSessionId],
+        [keys[1], String(deadline)],
+        [keys[2], task.trim()],
+        [keys[3], isolatedFocus.trim()],
+        [keys[4], prompt.trim()],
       ]);
       setSessionId(nextSessionId);
       setRemaining(ACTIVE_SECONDS);
@@ -201,24 +212,30 @@ export default function AlienModeScreen({ onBack }: { onBack: () => void }) {
       );
     } catch (beginError) {
       setError(firebaseErrorMessage(beginError));
+    } finally {
+      startingRef.current = false;
+      setStarting(false);
     }
   };
 
-  const completeActiveSession = async () => {
-    if (!sessionId || finalizingRef.current) return;
+  const completeActiveSession = async (retry = false) => {
+    if (!sessionId || finalizingRef.current || !completionGate.start(retry)) return;
     finalizingRef.current = true;
     setFinalizing(true);
+    setCompletionFailed(false);
+    setError(null);
     try {
       await finishAlienModeSession(sessionId, ACTIVE_SECONDS, true);
-      await clearAlienSessionStorage();
+      if (keysRef.current) await clearAlienSessionStorage(keysRef.current);
       setPhase("complete");
       setSessionId(null);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
         () => undefined,
       );
     } catch (completionError) {
-      setError(firebaseErrorMessage(completionError));
-      setRemaining(1);
+      completionGate.fail();
+      setCompletionFailed(true);
+      setError(`Could not save your completed session: ${firebaseErrorMessage(completionError)}`);
       finalizingRef.current = false;
       setFinalizing(false);
     }
@@ -226,6 +243,10 @@ export default function AlienModeScreen({ onBack }: { onBack: () => void }) {
 
   const leave = async () => {
     if (finalizingRef.current) return;
+    if (completionFailed) {
+      onBack();
+      return;
+    }
     finalizingRef.current = true;
     setFinalizing(true);
     try {
@@ -236,7 +257,7 @@ export default function AlienModeScreen({ onBack }: { onBack: () => void }) {
           false,
         );
       }
-      await clearAlienSessionStorage();
+      if (sessionId && keysRef.current) await clearAlienSessionStorage(keysRef.current);
       onBack();
     } catch (leaveError) {
       setError(firebaseErrorMessage(leaveError));
@@ -245,21 +266,20 @@ export default function AlienModeScreen({ onBack }: { onBack: () => void }) {
     }
   };
 
-  const restoreActiveSession = async () => {
+  const restoreActiveSession = async (keys: string[], isMounted: () => boolean) => {
     const [
       savedSession,
       savedDeadline,
       savedTask,
       savedMicroAction,
       savedPrompt,
-    ] = await AsyncStorage.multiGet([
-      ACTIVE_SESSION_KEY,
-      ACTIVE_DEADLINE_KEY,
-      TASK_KEY,
-      MICRO_ACTION_KEY,
-      PROMPT_KEY,
-    ]).then((entries) => entries.map(([, value]) => value));
-    if (!savedSession || !savedDeadline) return;
+    ] = await AsyncStorage.multiGet(keys).then((entries) => entries.map(([, value]) => value));
+    if (!isMounted()) return;
+    if ([savedSession, savedDeadline, savedTask, savedMicroAction, savedPrompt].every((value) => value === null)) return;
+    if (!savedSession || !savedDeadline || !savedTask || !savedMicroAction || !savedPrompt) {
+      throw new Error("Saved focus session is incomplete.");
+    }
+    if (!Number.isFinite(Number(savedDeadline))) throw new Error("Saved focus timer is invalid.");
     const next = Math.max(
       0,
       Math.ceil((Number(savedDeadline) - Date.now()) / 1000),
@@ -273,13 +293,14 @@ export default function AlienModeScreen({ onBack }: { onBack: () => void }) {
     if (savedPrompt) setPrompt(savedPrompt);
     setRemaining(next);
     setPhase("active");
-    if (next === 0) void completeActiveSession();
   };
 
   const renderConfession = () => (
     <>
+      <Text style={styles.eyebrow}>ALIEN MODE / BREAK IT DOWN</Text>
       <Text style={styles.title}>what is looming?</Text>
       <TextInput
+        accessibilityLabel="The task you want to break down"
         value={task}
         onChangeText={(value) => {
           setTask(value);
@@ -290,25 +311,35 @@ export default function AlienModeScreen({ onBack }: { onBack: () => void }) {
         style={styles.input}
         multiline
       />
-      <SwipeAction
-        label="flick to surrender →"
-        direction="right"
-        onComplete={surrender}
-        color={colors.rose}
-      />
+      <Text style={styles.subtitle}>If you start a focus session, your task and selected step are also saved to your Firebase account.</Text>
+      {aiConsent.status === "loading" && <Text style={styles.subtitle}>Checking AI agreement...</Text>}
+      {aiConsent.status === "not-agreed" && (
+        <AiConsent disabled={aiConsent.saving} onAgree={() => void aiConsent.change(true)} />
+      )}
+      {aiConsent.status === "agreed" && (
+        <>
+          <Text style={styles.subtitle}>Your task will be sent to Gemini. Avoid personal or confidential details.</Text>
+          <AccessibleSwipeAction label="send task and make steps" disabled={generating} onActivate={() => void surrender()} />
+        </>
+      )}
+      {!!aiConsent.error && <Text style={styles.error}>{aiConsent.error}</Text>}
+      {aiConsent.status === "error" && <AccessibleSwipeAction label="retry checking AI agreement" onActivate={() => void aiConsent.refresh()} />}
+      {generating && <Text style={styles.subtitle}>Making your steps...</Text>}
     </>
   );
 
   const renderInterception = () => (
     <>
+      <Text style={styles.eyebrow}>YOUR FIRST STEP</Text>
       <View style={styles.whiteCircle}>
         <Text style={styles.prompt}>{prompt}</Text>
         <Text style={styles.circleAction}>{microAction}</Text>
       </View>
       <Text style={styles.circleExplanation}>
-        See this situation from this perspective for the next 30 minutes and
-        notice what changes.
+        Your suggested steps:
       </Text>
+      {steps.map((step, index) => <Text key={`${index}-${step}`} style={styles.circleExplanation}>{index + 1}. {step}</Text>)}
+      <Text style={styles.circleExplanation}>The first step becomes your focus for the next 30 minutes. AI can make mistakes; review the steps first.</Text>
       <SwipeAction
         label="drag the focus up to isolate ↑"
         direction="up"
@@ -321,8 +352,9 @@ export default function AlienModeScreen({ onBack }: { onBack: () => void }) {
   const renderRitual = () => (
     <View style={styles.ritual}>
       <Text style={styles.ritualHeading}>YOUR ONLY FOCUS</Text>
-      <Text style={styles.ritualPrompt}>{prompt}</Text>
+      <Text style={styles.ritualPrompt}>{isolatedFocus}</Text>
       <BeginPuzzle onComplete={() => void begin()} />
+      <AccessibleSwipeAction label={starting ? "starting session" : "begin focus session"} disabled={starting} onActivate={() => void begin()} />
     </View>
   );
 
@@ -341,30 +373,25 @@ export default function AlienModeScreen({ onBack }: { onBack: () => void }) {
           contentContainerStyle={[styles.content, styles.contentGrow]}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
-          automaticallyAdjustKeyboardInsets
+          alwaysBounceVertical
           showsVerticalScrollIndicator={false}
         >
-          <GestureDetector
-            gesture={Gesture.Pan().onEnd((event) => {
-              if (event.translationX > 80) runOnJS(onBack)();
-            })}
-          >
-            <Text style={[styles.nav, phase === "ritual" && styles.ritualText]}>
-              ← focus state.
-            </Text>
-          </GestureDetector>
-          {phase === "confession" && renderConfession()}
+          <AccessibleSwipeAction label="back to focus" disabled={starting || finalizing} onActivate={onBack} />
+          {restoring && <Text style={styles.subtitle}>Checking your saved session...</Text>}
+          {phase === "confession" && !restoring && !restoreFailed && renderConfession()}
           {phase === "interception" && renderInterception()}
           {phase === "ritual" && renderRitual()}
           {phase === "active" && (
             <>
               <Text style={styles.eyebrow}>focus active</Text>
               <Text style={styles.title}>one thing.</Text>
-              <Text style={styles.subtitle}>{prompt}</Text>
+              <Text style={styles.subtitle}>{isolatedFocus}</Text>
               <Text style={styles.timer}>{formatTime(remaining)}</Text>
-              <Text style={styles.leave} onPress={() => void leave()}>
-                leave session →
-              </Text>
+              {completionFailed ? (
+                <AccessibleSwipeAction label="retry saving completed session" disabled={finalizing} onActivate={() => void completeActiveSession(true)} />
+              ) : (
+                <AccessibleSwipeAction label="leave session" disabled={finalizing} onActivate={() => void leave()} />
+              )}
             </>
           )}
           {phase === "complete" && (
@@ -374,9 +401,7 @@ export default function AlienModeScreen({ onBack }: { onBack: () => void }) {
               <Text style={styles.subtitle}>
                 The session was completed and logged.
               </Text>
-              <Text style={styles.leave} onPress={onBack}>
-                return to focus state →
-              </Text>
+              <AccessibleSwipeAction label="return to focus state" onActivate={onBack} />
             </>
           )}
           {error && <Text style={styles.error}>{error}</Text>}
@@ -474,21 +499,15 @@ function formatTime(seconds: number) {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
-function clearAlienSessionStorage() {
-  return AsyncStorage.multiRemove([
-    ACTIVE_SESSION_KEY,
-    ACTIVE_DEADLINE_KEY,
-    TASK_KEY,
-    MICRO_ACTION_KEY,
-    PROMPT_KEY,
-  ]);
+function clearAlienSessionStorage(keys: string[]) {
+  return AsyncStorage.multiRemove(keys);
 }
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bgDark, overflow: "hidden" },
   ritualScreen: { backgroundColor: colors.bgDark },
   keyboard: { flex: 1 },
-  content: { padding: 28, paddingTop: 54, paddingBottom: 42 },
+  content: { padding: 28, paddingTop: 68, paddingBottom: 64 },
   contentGrow: { flexGrow: 1 },
   nav: {
     color: colors.rose,
@@ -508,12 +527,13 @@ const styles = StyleSheet.create({
     opacity: 0.34,
   },
   eyebrow: {
-    color: colors.orange,
+    color: "#ff9aaa",
     fontSize: 11,
     fontWeight: "800",
     letterSpacing: 2,
     textTransform: "uppercase",
-    marginBottom: 18,
+    marginTop: 30,
+    marginBottom: 14,
   },
   title: {
     color: colors.white,
@@ -523,9 +543,9 @@ const styles = StyleSheet.create({
     letterSpacing: -2,
   },
   subtitle: {
-    color: colors.white50,
-    fontSize: 17,
-    lineHeight: 25,
+    color: "#d8cccf",
+    fontSize: 15,
+    lineHeight: 23,
     marginTop: 18,
     maxWidth: 330,
   },
@@ -533,10 +553,14 @@ const styles = StyleSheet.create({
     color: colors.white,
     fontSize: 20,
     lineHeight: 28,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.white20,
-    paddingVertical: 12,
-    marginTop: 42,
+    borderWidth: 1,
+    borderColor: "#713d4d",
+    borderRadius: 18,
+    backgroundColor: "#21161a",
+    minHeight: 110,
+    padding: 18,
+    marginTop: 26,
+    textAlignVertical: "top",
   },
   swipe: {
     fontSize: 14,
@@ -553,10 +577,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   whiteCircle: {
-    alignSelf: "center",
-    width: 230,
-    height: 230,
-    borderRadius: 115,
+    alignSelf: "stretch",
+    minHeight: 160,
+    borderRadius: 24,
     backgroundColor: colors.white,
     alignItems: "center",
     justifyContent: "center",
@@ -578,11 +601,11 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   circleExplanation: {
-    color: colors.white50,
-    fontSize: 13,
-    lineHeight: 20,
-    textAlign: "center",
-    marginTop: 18,
+    color: "#e1d6d9",
+    fontSize: 15,
+    lineHeight: 23,
+    textAlign: "left",
+    marginTop: 14,
   },
   ritual: {
     flex: 1,
@@ -638,7 +661,7 @@ const styles = StyleSheet.create({
     width: "100%",
     alignItems: "center",
     justifyContent: "flex-start",
-    marginTop: 180,
+    marginTop: 60,
   },
   beginTarget: {
     color: "rgba(255,255,255,0.28)",

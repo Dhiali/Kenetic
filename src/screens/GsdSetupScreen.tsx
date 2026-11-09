@@ -1,647 +1,405 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Haptics from "expo-haptics";
-import React, { useEffect, useState } from "react";
-import {
-    AppState,
-    Linking,
-    StyleSheet,
-    Text,
-    View,
-    type AppStateStatus,
-} from "react-native";
+import React, { useEffect, useRef, useState } from "react";
+import { AppState, Linking, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
-import Animated, {
-    Easing,
-    FadeIn,
-    FadeOut,
-    interpolate,
-    runOnJS,
-    useAnimatedStyle,
-    useSharedValue,
-    withRepeat,
-    withSequence,
-    withSpring,
-    withTiming,
-} from "react-native-reanimated";
+import Animated, { Easing, FadeIn, FadeOut, runOnJS, useAnimatedStyle, useSharedValue, withRepeat, withSequence, withSpring, withTiming } from "react-native-reanimated";
+import SwipeAction from "../components/SwipeAction";
+import { ensureAnonymousUser } from "../lib/firebase/auth";
 import { finishFocusTether, startFocusTether } from "../lib/firebase/bootstrap";
 import { firebaseErrorMessage } from "../lib/firebase/errors";
+import { focusRemainingSeconds, shouldStartFocus } from "../lib/focus/timing";
 import { colors } from "../theme/colors";
 
-const DEADLINE_KEY = "@kenetic/focus-tether-deadline";
-const SESSION_KEY = "@kenetic/focus-tether-session";
-const PENDING_PLATFORM_KEY = "@kenetic/focus-tether-platform";
-const PLANNED_MINUTES_KEY = "@kenetic/focus-tether-planned-minutes";
-const SESSION_DEADLINE_KEY = "@kenetic/focus-session-deadline";
-const TETHER_SECONDS = 120;
+const STORAGE_KEY = "@kenetic/focus-session-v2";
 const SESSION_OPTIONS = [25, 45, 60, 90];
-
-const triggerLauncherHaptic = () => {
-  Haptics.selectionAsync().catch(() => undefined);
+const storageKey = (uid: string) => `${STORAGE_KEY}/${uid}`;
+type PlatformChoice = "spotify" | "apple-music";
+type ScreenState = "setup" | "configure" | "handoff" | "session" | "complete";
+type StoredSession = {
+  uid: string;
+  sessionId: string;
+  platform: PlatformChoice;
+  plannedMinutes: number;
+  deadline: number | null;
 };
 
-type PlatformChoice = "spotify" | "apple-music";
-type ScreenState =
-  | "setup"
-  | "configure"
-  | "handoff"
-  | "session"
-  | "complete"
-  | "recenter";
+function isStoredSession(value: unknown): value is StoredSession {
+  if (!value || typeof value !== "object") return false;
+  const record = value as Record<string, unknown>;
+  return typeof record.uid === "string" && typeof record.sessionId === "string" &&
+    (record.platform === "spotify" || record.platform === "apple-music") &&
+    typeof record.plannedMinutes === "number" && SESSION_OPTIONS.includes(record.plannedMinutes) &&
+    (record.deadline === null || (typeof record.deadline === "number" && Number.isFinite(record.deadline)));
+}
 
 export default function GsdSetupScreen({ onBack }: { onBack: () => void }) {
   const [state, setState] = useState<ScreenState>("setup");
-  const [remaining, setRemaining] = useState(TETHER_SECONDS);
+  const [remaining, setRemaining] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [sessionId, setSessionId] = useState<string | null>(null);
-  const [pendingPlatform, setPendingPlatform] = useState<PlatformChoice | null>(
-    null,
-  );
-  const [tetherStarted, setTetherStarted] = useState(false);
+  const [platform, setPlatform] = useState<PlatformChoice | null>(null);
   const [plannedMinutes, setPlannedMinutes] = useState(25);
+  const [busy, setBusy] = useState(true);
+  const [restoreFailed, setRestoreFailed] = useState(false);
+  const [readyToRetry, setReadyToRetry] = useState(false);
+  const [retryTimer, setRetryTimer] = useState(false);
+  const recordRef = useRef<StoredSession | null>(null);
+  const busyRef = useRef(false);
+  const handoffRef = useRef({ launched: false, left: false });
+  const finishFailedRef = useRef(false);
+  const appStateRef = useRef<string>(AppState.currentState || "unknown");
   const pulse = useSharedValue(1);
   const orbOpacity = useSharedValue(0.32);
 
-  useEffect(() => {
-    pulse.value = withRepeat(
-      withSequence(
-        withTiming(1.1, { duration: 1800, easing: Easing.inOut(Easing.ease) }),
-        withTiming(1, { duration: 1800, easing: Easing.inOut(Easing.ease) }),
-      ),
-      -1,
-      true,
-    );
-    orbOpacity.value = withRepeat(
-      withSequence(
-        withTiming(0.58, { duration: 1800 }),
-        withTiming(0.32, { duration: 1800 }),
-      ),
-      -1,
-      true,
-    );
+  const lock = () => {
+    if (busyRef.current) return false;
+    busyRef.current = true;
+    setBusy(true);
+    return true;
+  };
+  const unlock = () => {
+    busyRef.current = false;
+    setBusy(false);
+  };
 
+  const startOnReturn = async () => {
+    const record = recordRef.current;
+    if (!record || record.deadline !== null ||
+        !shouldStartFocus(handoffRef.current.launched, handoffRef.current.left, appStateRef.current) ||
+        !lock()) return;
+    const next = { ...record, deadline: Date.now() + record.plannedMinutes * 60_000 };
+    try {
+      await AsyncStorage.setItem(storageKey(record.uid), JSON.stringify(next));
+      recordRef.current = next;
+      handoffRef.current = { launched: false, left: false };
+      setRemaining(focusRemainingSeconds(next.deadline, Date.now()));
+      setState("session");
+      setRetryTimer(false);
+      setError(null);
+    } catch (saveError) {
+      setError(`Could not start the timer: ${firebaseErrorMessage(saveError)} Return to Kenetic and retry.`);
+      setRetryTimer(true);
+    } finally {
+      unlock();
+    }
+  };
+  const startOnReturnRef = useRef(startOnReturn);
+  startOnReturnRef.current = startOnReturn;
+
+  useEffect(() => {
+    pulse.value = withRepeat(withSequence(
+      withTiming(1.1, { duration: 1800, easing: Easing.inOut(Easing.ease) }),
+      withTiming(1, { duration: 1800, easing: Easing.inOut(Easing.ease) }),
+    ), -1, true);
+    orbOpacity.value = withRepeat(withSequence(
+      withTiming(0.58, { duration: 1800 }),
+      withTiming(0.32, { duration: 1800 }),
+    ), -1, true);
     let mounted = true;
-    void restorePendingTether().then((pending) => {
-      if (!mounted || !pending) return;
-      setSessionId(pending.sessionId);
-      setPendingPlatform(pending.platform);
-      setTetherStarted(pending.started);
-      setPlannedMinutes(pending.plannedMinutes);
-      if (!pending.started) setState("configure");
-      else if (pending.phase === "session") {
-        setRemaining(pending.remaining);
-        setState("session");
-      } else if (pending.remaining <= 0) setState("recenter");
-      else {
-        setRemaining(pending.remaining);
-        setState("handoff");
+    const restore = async () => {
+      try {
+        const user = await ensureAnonymousUser();
+        const value = await AsyncStorage.getItem(storageKey(user.uid));
+        if (!mounted || !value) return;
+        const parsed: unknown = JSON.parse(value);
+        if (!isStoredSession(parsed)) throw new Error("Saved focus session is invalid.");
+        if (parsed.uid !== user.uid) return;
+        recordRef.current = parsed;
+        setPlatform(parsed.platform);
+        setPlannedMinutes(parsed.plannedMinutes);
+        if (parsed.deadline === null) {
+          setState("handoff");
+          setReadyToRetry(true);
+        } else {
+          setRemaining(focusRemainingSeconds(parsed.deadline, Date.now()));
+          setState("session");
+        }
+      } catch (restoreError) {
+        if (mounted) {
+          setRestoreFailed(true);
+          setError(`Could not restore the focus session: ${firebaseErrorMessage(restoreError)} Return to Focus and try again.`);
+        }
+      } finally {
+        if (mounted) setBusy(false);
       }
-    });
-    return () => {
-      mounted = false;
     };
+    void restore();
+    const subscription = AppState.addEventListener("change", (next) => {
+      appStateRef.current = next;
+      if (next === "background" && recordRef.current?.deadline === null) handoffRef.current.left = true;
+      if (next === "active") void startOnReturnRef.current();
+    });
+    return () => { mounted = false; subscription.remove(); };
   }, []);
 
+  const finishSession = async (completed: boolean) => {
+    const record = recordRef.current;
+    if (!record || !lock()) return;
+    try {
+      const secondsLeft = record.deadline === null ? record.plannedMinutes * 60 : focusRemainingSeconds(record.deadline, Date.now());
+      await finishFocusTether(record.sessionId, record.plannedMinutes * 60 - secondsLeft, completed);
+      await AsyncStorage.removeItem(storageKey(record.uid));
+      recordRef.current = null;
+      setError(null);
+      if (completed) {
+        setState("complete");
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
+      } else {
+        onBack();
+      }
+    } catch (finishError) {
+      finishFailedRef.current = true;
+      setError(`Could not save your session: ${firebaseErrorMessage(finishError)} Please retry.`);
+    } finally {
+      unlock();
+    }
+  };
+  const finishRef = useRef(finishSession);
+  finishRef.current = finishSession;
+
   useEffect(() => {
-    if (state !== "handoff" && state !== "session") return;
+    if (state !== "session") return;
     const tick = () => {
-      const deadlineKey =
-        state === "handoff" ? DEADLINE_KEY : SESSION_DEADLINE_KEY;
-      void AsyncStorage.getItem(deadlineKey).then((value) => {
-        if (!value) return;
-        const deadline = Number(value);
-        const next = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
-        setRemaining(next);
-        if (next === 0) {
-          if (state === "handoff") {
-            setState("setup");
-            setError(
-              "Your two-minute handoff ended. Set a new session to begin again.",
-            );
-            if (sessionId)
-              void finishFocusTether(sessionId, TETHER_SECONDS, false).catch(
-                () => undefined,
-              );
-            void clearSessionStorage();
-          } else {
-            setState("complete");
-            if (sessionId)
-              void finishFocusTether(
-                sessionId,
-                plannedMinutes * 60,
-                true,
-              ).catch(() => undefined);
-            void AsyncStorage.multiRemove([
-              SESSION_DEADLINE_KEY,
-              SESSION_KEY,
-              PENDING_PLATFORM_KEY,
-              PLANNED_MINUTES_KEY,
-            ]);
-            setSessionId(null);
-            Haptics.notificationAsync(
-              Haptics.NotificationFeedbackType.Success,
-            ).catch(() => undefined);
-          }
-        }
-      });
+      const deadline = recordRef.current?.deadline;
+      if (deadline == null) return;
+      const seconds = focusRemainingSeconds(deadline, Date.now());
+      setRemaining(seconds);
+      if (seconds === 0 && !busyRef.current && !finishFailedRef.current) void finishRef.current(true);
     };
     tick();
     const timer = setInterval(tick, 1000);
     return () => clearInterval(timer);
-  }, [state, sessionId]);
-
-  useEffect(() => {
-    const onAppState = (next: AppStateStatus) => {
-      if (state !== "handoff") return;
-      if (next !== "active") {
-        void activateTether();
-      } else {
-        void restorePendingTether().then((pending) => {
-          if (!pending || !pending.started) return;
-          if (pending.remaining <= 0) {
-            setState("setup");
-            setError(
-              "Your two-minute handoff ended. Set a new session to begin again.",
-            );
-            void AsyncStorage.multiRemove([
-              DEADLINE_KEY,
-              SESSION_KEY,
-              PENDING_PLATFORM_KEY,
-              PLANNED_MINUTES_KEY,
-            ]);
-          } else {
-            void beginFocusSessionOnReturn(pending);
-          }
-        });
-      }
-    };
-    const subscription = AppState.addEventListener("change", onAppState);
-    return () => subscription.remove();
   }, [state]);
 
-  const selectPlatform = async (platform: PlatformChoice) => {
-    setError(null);
-    await AsyncStorage.setItem(PENDING_PLATFORM_KEY, platform);
-    await AsyncStorage.multiRemove([DEADLINE_KEY, SESSION_KEY]);
-    setPendingPlatform(platform);
-    setSessionId(null);
-    setTetherStarted(false);
-    setRemaining(TETHER_SECONDS);
-    setState("configure");
-    setPlannedMinutes(25);
+  const openMusic = async (record: StoredSession) => {
+    handoffRef.current = { launched: false, left: false };
+    setReadyToRetry(false);
+    setState("handoff");
+    const url = record.platform === "spotify"
+      ? "spotify://"
+      : "music://music.apple.com/";
+    try {
+      await Linking.openURL(url);
+      handoffRef.current.launched = true;
+      setReadyToRetry(true);
+    } catch {
+      handoffRef.current = { launched: false, left: false };
+      setReadyToRetry(true);
+      setError(`Could not open ${record.platform === "spotify" ? "Spotify" : "Apple Music"}. Make sure it is installed and try again.`);
+    }
   };
 
   const beginHandoff = async () => {
-    if (!pendingPlatform) return;
-    setError(null);
-    await AsyncStorage.setItem(PLANNED_MINUTES_KEY, String(plannedMinutes));
-    setState("handoff");
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(
-      () => undefined,
-    );
-
-    const url = pendingPlatform === "spotify" ? "spotify://" : "music://";
-    Linking.openURL(url).catch(() => {
-      setError(
-        `Could not open ${pendingPlatform === "spotify" ? "Spotify" : "Apple Music"}. Make sure it is installed.`,
-      );
-    });
-  };
-
-  const activateTether = async () => {
-    const storedPlatform = await AsyncStorage.getItem(PENDING_PLATFORM_KEY);
-    const platform =
-      pendingPlatform ?? (storedPlatform as PlatformChoice | null);
-    if (!platform || (await AsyncStorage.getItem(DEADLINE_KEY))) return;
-
-    const deadline = Date.now() + TETHER_SECONDS * 1000;
-    await AsyncStorage.setItem(DEADLINE_KEY, String(deadline));
-    setTetherStarted(true);
-    try {
-      const nextSessionId = await startFocusTether(platform, plannedMinutes);
-      setSessionId(nextSessionId);
-      await AsyncStorage.setItem(SESSION_KEY, nextSessionId);
-    } catch (launchError) {
-      setError(firebaseErrorMessage(launchError));
-    }
-  };
-
-  const completeRecenter = async () => {
-    setError(null);
-    if (!sessionId) {
-      await clearSessionStorage();
-      setState("setup");
-      setPendingPlatform(null);
-      setTetherStarted(false);
-      setPlannedMinutes(25);
-      setRemaining(TETHER_SECONDS);
-      return;
-    }
-    try {
-      await finishFocusTether(sessionId, TETHER_SECONDS, false);
-      await AsyncStorage.multiRemove([
-        DEADLINE_KEY,
-        SESSION_KEY,
-        PENDING_PLATFORM_KEY,
-        PLANNED_MINUTES_KEY,
-        SESSION_DEADLINE_KEY,
-      ]);
-      setState("setup");
-      setRemaining(TETHER_SECONDS);
-      setSessionId(null);
-      setPendingPlatform(null);
-      setTetherStarted(false);
-      setPlannedMinutes(25);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
-        () => undefined,
-      );
-    } catch (recenterError) {
-      setError(firebaseErrorMessage(recenterError));
-    }
-  };
-
-  const restartAfterRecenter = async () => {
+    if (!platform || !lock()) return;
     setError(null);
     try {
-      if (sessionId) {
-        await finishFocusTether(sessionId, 0, false);
+      const user = await ensureAnonymousUser();
+      const sessionId = await startFocusTether(platform, plannedMinutes);
+      const record: StoredSession = { uid: user.uid, sessionId, platform, plannedMinutes, deadline: null };
+      recordRef.current = record;
+      try {
+        await AsyncStorage.setItem(storageKey(record.uid), JSON.stringify(record));
+      } catch (saveError) {
+        try {
+          await finishFocusTether(sessionId, 0, false);
+          recordRef.current = null;
+        } catch (cleanupError) {
+          setState("handoff");
+          throw new Error(`Could not save the session locally or cancel it: ${firebaseErrorMessage(cleanupError)}`);
+        }
+        throw saveError;
       }
-      await clearSessionStorage();
-      setState("setup");
-      setPendingPlatform(null);
-      setSessionId(null);
-      setTetherStarted(false);
-      setPlannedMinutes(25);
-      setRemaining(TETHER_SECONDS);
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(
-        () => undefined,
-      );
-    } catch (restartError) {
-      setError(firebaseErrorMessage(restartError));
+      await openMusic(record);
+    } catch (startError) {
+      setError(`Could not prepare your session: ${firebaseErrorMessage(startError)}`);
+    } finally {
+      unlock();
+      void startOnReturnRef.current();
     }
   };
 
-  const beginFocusSessionOnReturn = async (pending: {
-    sessionId: string;
-    remaining: number;
-  }) => {
-    const deadline = Date.now() + plannedMinutes * 60 * 1000;
+  const retryHandoff = async () => {
+    const record = recordRef.current;
+    if (!record || !lock()) return;
+    setError(null);
     try {
-      await AsyncStorage.setItem(SESSION_DEADLINE_KEY, String(deadline));
-      await AsyncStorage.multiRemove([DEADLINE_KEY]);
-      setRemaining(plannedMinutes * 60);
-      setState("session");
-      setTetherStarted(true);
-    } catch (returnError) {
-      setError(firebaseErrorMessage(returnError));
+      await openMusic(record);
+    } finally {
+      unlock();
+      void startOnReturnRef.current();
     }
   };
 
-  const leaveSession = async () => {
-    if (!sessionId) {
-      onBack();
-      return;
+  const exitToFocus = () => {
+    if (busy) return;
+    if (recordRef.current) {
+      const deadline = recordRef.current.deadline;
+      void finishSession(deadline !== null && focusRemainingSeconds(deadline, Date.now()) === 0);
     }
-    try {
-      await finishFocusTether(
-        sessionId,
-        plannedMinutes * 60 - remaining,
-        false,
-      );
-      await AsyncStorage.multiRemove([
-        DEADLINE_KEY,
-        SESSION_KEY,
-        PENDING_PLATFORM_KEY,
-        PLANNED_MINUTES_KEY,
-        SESSION_DEADLINE_KEY,
-      ]);
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(
-        () => undefined,
-      );
-      onBack();
-    } catch (leaveError) {
-      setError(firebaseErrorMessage(leaveError));
-    }
+    else onBack();
   };
-
-  const exitToFocus = async () => {
-    if (state === "handoff" || state === "session") {
-      if (sessionId) {
-        await finishFocusTether(
-          sessionId,
-          state === "session"
-            ? Math.max(0, plannedMinutes * 60 - remaining)
-            : 0,
-          false,
-        ).catch(() => undefined);
-      }
-      await clearSessionStorage();
-    } else if (state === "configure" || state === "recenter") {
-      await clearSessionStorage();
-    }
-    onBack();
-  };
-
   const orbStyle = useAnimatedStyle(() => ({
     transform: [{ scale: pulse.value }],
     opacity: orbOpacity.value,
   }));
 
   return (
-    <Animated.View
-      entering={FadeIn.duration(500)}
-      exiting={FadeOut.duration(300)}
-      style={styles.screen}
-    >
-      <View style={styles.content}>
-        <GestureDetector
-          gesture={Gesture.Pan().onEnd((event) => {
-            if (event.translationX > 80) runOnJS(exitToFocus)();
-          })}
-        >
-          <Text style={styles.nav}>← focus state.</Text>
-        </GestureDetector>
-        {state === "setup" && (
-          <>
-            <Text style={styles.title}>get shit done.</Text>
-            <Text style={styles.subtitle}>
-              Choose your sound tether. Drag it into the energy source to begin.
-            </Text>
-          </>
-        )}
-        {state === "configure" && (
-          <>
-            <Text style={styles.eyebrow}>sound tether</Text>
-            <Text style={styles.title}>set your session.</Text>
-            <Text style={styles.subtitle}>
-              Choose how long you want to stay in focus before launching your
-              music.
-            </Text>
-          </>
-        )}
-        {state === "handoff" && (
-          <>
-            <Text style={styles.eyebrow}>tether active</Text>
-            <Text style={styles.title}>queue your sound.</Text>
-            <Text style={styles.subtitle}>
-              {tetherStarted
-                ? "You have two minutes to choose your music, set the volume, and step away."
-                : "Your tether begins when you leave Kenetic. Choose your music, then step away."}
-            </Text>
-          </>
-        )}
-        {state === "session" && (
-          <>
-            <Text style={styles.eyebrow}>focus in progress</Text>
-            <Text style={styles.title}>stay with it.</Text>
-            <Text style={styles.subtitle}>
-              Your {plannedMinutes}-minute session is in progress. Leave when
-              you are ready.
-            </Text>
-          </>
-        )}
-        {state === "complete" && (
-          <>
-            <Text style={styles.eyebrow}>session complete</Text>
-            <Text style={styles.title}>congratulations.</Text>
-            <Text style={styles.subtitle}>
-              You completed your {plannedMinutes}-minute focus session.
-            </Text>
-          </>
-        )}
-        {state === "recenter" && (
-          <>
-            <Text style={styles.eyebrow}>tether expired</Text>
-            <Text style={styles.title}>re-center.</Text>
-            <Text style={styles.subtitle}>
-              Place your phone face down for ten seconds, then choose your music
-              again to restart your focus session.
-            </Text>
-          </>
-        )}
-
-        <View style={styles.orbArea}>
+    <Animated.View entering={FadeIn.duration(500)} exiting={FadeOut.duration(300)} style={styles.screen}>
+      <ScrollView contentContainerStyle={styles.content}>
+        {state !== "session" && <SwipeAction label="back to focus" disabled={busy} onActivate={exitToFocus} />}
+        {state === "setup" && <>
+          <Text style={styles.title}>get shit done.</Text>
+          <Text style={styles.subtitle}>Choose your sound tether. Drag it upward to set your session.</Text>
+        </>}
+        {state === "configure" && <>
+          <Text style={styles.eyebrow}>GET SHIT DONE / SESSION SETUP</Text>
+          <Text style={styles.title}>set your session.</Text>
+          <Text style={styles.subtitle}>Choose your focus time, then open your music.</Text>
+          <Text style={styles.timerNotice}>Your timer starts when you return to Kenetic.</Text>
+        </>}
+        {state === "handoff" && <>
+          <Text style={styles.eyebrow}>sound tether</Text>
+          <Text style={styles.title}>queue your sound.</Text>
+          <Text style={styles.subtitle}>Choose your music, then return to Kenetic.</Text>
+          <Text style={styles.timerNotice}>Your timer starts when you return to Kenetic.</Text>
+        </>}
+        {state === "session" && <>
+          <Text style={styles.eyebrow}>focus in progress</Text>
+          <Text style={styles.title}>stay with it.</Text>
+          <Text style={styles.subtitle}>One moment at a time. Your focus session is underway.</Text>
+          <View style={styles.activeTimerArea}>
+            <Animated.View pointerEvents="none" style={[styles.activeTimerGlow, orbStyle]} />
+            <View style={styles.activeTimer}>
+              <Text style={styles.activeTimerCaption}>TIME REMAINING</Text>
+              <Text
+                accessibilityLabel={`${Math.floor(remaining / 60)} minutes and ${remaining % 60} seconds remaining`}
+                style={styles.activeTimerValue}
+                adjustsFontSizeToFit
+                numberOfLines={1}
+              >
+                {formatTime(remaining)}
+              </Text>
+              <Text style={styles.activeTimerDuration}>{plannedMinutes} MINUTE SESSION</Text>
+            </View>
+          </View>
+        </>}
+        {state === "complete" && <>
+          <Text style={styles.eyebrow}>session complete</Text>
+          <Text style={styles.title}>congratulations.</Text>
+          <Text style={styles.subtitle}>You completed your {plannedMinutes}-minute focus session.</Text>
+        </>}
+        {state !== "configure" && state !== "session" && <View style={styles.orbArea}>
           <Animated.View style={[styles.orbGlow, orbStyle]} />
           <View style={styles.orb}>
-            <Text style={styles.orbLabel}>
-              {state === "handoff"
-                ? tetherStarted
-                  ? formatTime(remaining)
-                  : "ready"
-                : state === "session"
-                  ? formatTime(remaining)
-                  : state === "recenter"
-                    ? "10 sec"
-                    : state === "complete"
-                      ? "done"
-                      : "drop here"}
-            </Text>
+            <Text style={styles.orbLabel}>{state === "complete" ? "done" : state === "handoff" ? "ready" : "focus"}</Text>
           </View>
-        </View>
-
-        {state === "setup" && (
-          <View style={styles.launchers}>
-            <Launcher
-              label="open spotify ↗"
-              color={colors.green}
-              onLaunch={() => void selectPlatform("spotify")}
-            />
-            <Launcher
-              label="open apple music ↗"
-              color={colors.rose}
-              onLaunch={() => void selectPlatform("apple-music")}
-            />
+        </View>}
+        {state === "setup" && <View style={styles.launchers}>
+          <Launcher label="choose spotify" color={colors.green} disabled={busy || restoreFailed} onLaunch={() => { setPlatform("spotify"); setPlannedMinutes(25); setState("configure"); setError(null); }} />
+          <Launcher label="choose apple music" color={colors.rose} disabled={busy || restoreFailed} onLaunch={() => { setPlatform("apple-music"); setPlannedMinutes(25); setState("configure"); setError(null); }} />
+        </View>}
+        {state === "configure" && <View style={styles.configure}>
+          <Text style={styles.configureLabel}>YOUR SOUND</Text>
+          <Text style={styles.selectedPlatform}>{platform === "spotify" ? "Spotify" : "Apple Music"}</Text>
+          <Text style={styles.configureLabel}>CHOOSE YOUR FOCUS TIME</Text>
+          <Text style={styles.configureHint}>Drag a time to the right to select it.</Text>
+          <View style={styles.sessionOptions}>
+            {SESSION_OPTIONS.map((minutes) => (
+              <DurationChoice
+                key={minutes}
+                minutes={minutes}
+                selected={plannedMinutes === minutes}
+                disabled={busy}
+                onSelect={() => setPlannedMinutes(minutes)}
+              />
+            ))}
           </View>
-        )}
-        {state === "configure" && (
-          <View style={styles.configure}>
-            <Text style={styles.configureLabel}>how long is this session?</Text>
-            <View style={styles.sessionOptions}>
-              {SESSION_OPTIONS.map((minutes) => (
-                <Text
-                  key={minutes}
-                  onPress={() => setPlannedMinutes(minutes)}
-                  style={[
-                    styles.sessionOption,
-                    plannedMinutes === minutes && styles.sessionOptionActive,
-                  ]}
-                >
-                  {minutes}m
-                </Text>
-              ))}
-            </View>
-            <Text style={styles.selectedPlatform}>
-              sound: {pendingPlatform === "spotify" ? "spotify" : "apple music"}
-            </Text>
-            <Text
-              style={styles.beginAction}
-              onPress={() => void beginHandoff()}
-            >
-              swipe right to begin →
-            </Text>
-          </View>
-        )}
-        {state === "handoff" && (
-          <Text style={styles.status}>
-            return to kenetic when you are ready.
-          </Text>
-        )}
-        {state === "session" && (
-          <Text style={styles.leaveAction} onPress={() => void leaveSession()}>
-            leave session →
-          </Text>
-        )}
-        {state === "complete" && (
-          <Text style={styles.leaveAction} onPress={onBack}>
-            return to focus state →
-          </Text>
-        )}
-        {state === "recenter" && (
-          <>
-            <HoldToRecenter onComplete={() => void completeRecenter()} />
-            <Text
-              style={styles.restartAction}
-              onPress={() => void restartAfterRecenter()}
-            >
-              restart session →
-            </Text>
-          </>
-        )}
-        {error && <Text style={styles.error}>{error}</Text>}
-      </View>
+          <Text style={styles.sessionSummary}>Ready for {plannedMinutes} minutes of focus.</Text>
+          <SwipeAction label="open music" disabled={busy} onActivate={() => void beginHandoff()} />
+        </View>}
+        {state === "handoff" && retryTimer && <SwipeAction label="retry starting timer" disabled={busy} onActivate={() => void startOnReturn()} />}
+        {state === "handoff" && readyToRetry && !retryTimer && <SwipeAction label="open music again" disabled={busy} onActivate={() => void retryHandoff()} />}
+        {state === "session" && <View style={styles.activeActions}>
+          <SwipeAction label={remaining === 0 ? "retry saving session" : "leave session"} disabled={busy} onActivate={() => void finishSession(remaining === 0)} />
+        </View>}
+        {state === "complete" && <SwipeAction label="return to focus state" onActivate={onBack} />}
+        {busy && <Text style={styles.status}>please wait...</Text>}
+        {error && <Text accessibilityLiveRegion="polite" style={styles.error}>{error}</Text>}
+      </ScrollView>
     </Animated.View>
   );
 }
 
-function Launcher({
-  label,
-  color,
-  onLaunch,
-}: {
-  label: string;
-  color: string;
-  onLaunch: () => void;
+function DurationChoice({ minutes, selected, disabled, onSelect }: {
+  minutes: number;
+  selected: boolean;
+  disabled: boolean;
+  onSelect: () => void;
 }) {
-  const x = useSharedValue(0);
-  const y = useSharedValue(0);
-  const scale = useSharedValue(1);
+  const offset = useSharedValue(0);
   const gesture = Gesture.Pan()
-    .onBegin(() => {
-      scale.value = withSpring(1.04);
-      runOnJS(triggerLauncherHaptic)();
-    })
+    .enabled(!disabled)
+    .activeOffsetX(10)
+    .failOffsetY([-15, 15])
     .onUpdate((event) => {
-      x.value = event.translationX;
-      y.value = event.translationY;
+      offset.value = Math.max(0, Math.min(20, event.translationX));
     })
     .onEnd((event) => {
-      if (event.translationY < -120) {
-        x.value = withTiming(0, { duration: 260 });
-        y.value = withTiming(-190, { duration: 260 });
-        runOnJS(onLaunch)();
-      } else {
-        x.value = withSpring(0);
-        y.value = withSpring(0);
-      }
-      scale.value = withSpring(1);
-    });
-  const style = useAnimatedStyle(() => ({
-    transform: [
-      { translateX: x.value },
-      { translateY: y.value },
-      { scale: scale.value },
-    ],
-  }));
-  return (
-    <GestureDetector gesture={gesture}>
-      <Animated.View style={[styles.launcher, { borderColor: color }, style]}>
-        <Text style={styles.launcherText}>{label}</Text>
-      </Animated.View>
-    </GestureDetector>
-  );
-}
-
-function HoldToRecenter({ onComplete }: { onComplete: () => void }) {
-  const [seconds, setSeconds] = useState(10);
-  const progress = useSharedValue(0);
-  const gesture = Gesture.LongPress()
-    .minDuration(10000)
-    .onStart(() => {
-      progress.value = withTiming(1, { duration: 10000 });
+      if (event.translationX >= 60) runOnJS(onSelect)();
     })
-    .onEnd((_event, success) => {
-      if (success) runOnJS(onComplete)();
-      else progress.value = withTiming(0, { duration: 250 });
+    .onFinalize(() => {
+      offset.value = withSpring(0);
     });
-  const style = useAnimatedStyle(() => ({
-    width: `${interpolate(progress.value, [0, 1], [0, 100])}%`,
+  const dragStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: offset.value }],
   }));
-  useEffect(() => {
-    const timer = setInterval(
-      () => setSeconds((value) => Math.max(0, value - 1)),
-      1000,
-    );
-    return () => clearInterval(timer);
-  }, []);
+  const label = `${minutes} minutes`;
+
   return (
-    <GestureDetector gesture={gesture}>
-      <View style={styles.recenterTrack}>
-        <Animated.View style={styles.recenterFill}>
-          <Animated.View style={style} />
+    <View style={styles.sessionOption}>
+      <GestureDetector gesture={gesture}>
+        <Animated.View
+          accessible
+          accessibilityRole="adjustable"
+          accessibilityLabel={label}
+          accessibilityHint="Drag right, or activate to select this duration."
+          accessibilityState={{ disabled, selected }}
+          accessibilityActions={[{ name: "activate", label: `Select ${label}` }]}
+          onAccessibilityAction={(event) => {
+            if (!disabled && event.nativeEvent.actionName === "activate") onSelect();
+          }}
+          onAccessibilityTap={() => { if (!disabled) onSelect(); }}
+          style={[styles.durationChoice, selected && styles.durationSelected, disabled && styles.durationDisabled, dragStyle]}
+        >
+          <Text style={[styles.durationValue, selected && styles.durationValueSelected]}>
+            {minutes}<Text style={styles.durationUnit}> min</Text>
+          </Text>
+          <Text style={styles.durationHint}>{selected ? "SELECTED" : "DRAG RIGHT →"}</Text>
         </Animated.View>
-        <Text style={styles.recenterText}>
-          hold phone face down · {seconds}s
-        </Text>
-      </View>
-    </GestureDetector>
+      </GestureDetector>
+    </View>
   );
 }
 
-async function restorePendingTether() {
-  const [
-    deadlineValue,
-    sessionDeadlineValue,
-    sessionId,
-    platform,
-    plannedMinutesValue,
-  ] = await AsyncStorage.multiGet([
-    DEADLINE_KEY,
-    SESSION_DEADLINE_KEY,
-    SESSION_KEY,
-    PENDING_PLATFORM_KEY,
-    PLANNED_MINUTES_KEY,
-  ]).then((entries) => entries.map(([, value]) => value));
-  const deadline = Number(deadlineValue || sessionDeadlineValue);
-  const plannedMinutes = Number(plannedMinutesValue) || 25;
-  if (!platform || !deadline || !sessionId) {
-    if (platform && !deadline) {
-      return {
-        platform: platform as PlatformChoice,
-        sessionId: "",
-        plannedMinutes,
-        remaining: TETHER_SECONDS,
-        started: false,
-      };
-    }
-    return null;
-  }
-  return {
-    sessionId,
-    platform: platform as PlatformChoice,
-    plannedMinutes,
-    remaining: Math.max(0, Math.ceil((deadline - Date.now()) / 1000)),
-    started: true,
-    phase: sessionDeadlineValue ? "session" : "handoff",
-  };
-}
-
-function clearSessionStorage() {
-  return AsyncStorage.multiRemove([
-    DEADLINE_KEY,
-    SESSION_DEADLINE_KEY,
-    SESSION_KEY,
-    PENDING_PLATFORM_KEY,
-    PLANNED_MINUTES_KEY,
-  ]);
+function Launcher({ label, color, disabled, onLaunch }: { label: string; color: string; disabled: boolean; onLaunch: () => void }) {
+  const y = useSharedValue(0);
+  const gesture = Gesture.Pan().enabled(!disabled)
+    .onUpdate((event) => { y.value = Math.min(0, event.translationY); })
+    .onEnd((event) => {
+      if (event.translationY < -120) runOnJS(onLaunch)();
+      y.value = withSpring(0);
+    });
+  const style = useAnimatedStyle(() => ({ transform: [{ translateY: y.value }] }));
+  return <GestureDetector gesture={gesture}>
+    <Animated.View accessible accessibilityRole="adjustable" accessibilityLabel={label}
+      accessibilityHint="Drag up, or activate to select." accessibilityState={{ disabled }}
+      accessibilityActions={[{ name: "activate", label }]}
+      onAccessibilityAction={(event) => { if (!disabled && event.nativeEvent.actionName === "activate") onLaunch(); }}
+      onAccessibilityTap={() => { if (!disabled) onLaunch(); }}
+      style={[styles.launcher, { borderColor: color }, style]}>
+      <Text style={styles.launcherText}>{label} ↑</Text>
+    </Animated.View>
+  </GestureDetector>;
 }
 
 function formatTime(seconds: number) {
@@ -650,165 +408,39 @@ function formatTime(seconds: number) {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bgDark, overflow: "hidden" },
-  content: { flex: 1, padding: 28, paddingTop: 54, paddingBottom: 42 },
-  nav: {
-    color: colors.rose,
-    fontSize: 14,
-    fontWeight: "700",
-    marginTop: 34,
-    marginBottom: 50,
-  },
-  eyebrow: {
-    color: colors.orange,
-    fontSize: 11,
-    fontWeight: "800",
-    letterSpacing: 2.2,
-    textTransform: "uppercase",
-    marginBottom: 18,
-  },
-  title: {
-    color: colors.white,
-    fontSize: 48,
-    lineHeight: 50,
-    fontWeight: "900",
-    letterSpacing: -2,
-  },
-  subtitle: {
-    color: colors.white50,
-    fontSize: 16,
-    lineHeight: 24,
-    marginTop: 18,
-    maxWidth: 330,
-  },
-  orbArea: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    minHeight: 260,
-  },
-  orbGlow: {
-    position: "absolute",
-    width: 250,
-    height: 250,
-    borderRadius: 125,
-    backgroundColor: colors.rose,
-  },
-  orb: {
-    width: 176,
-    height: 176,
-    borderRadius: 88,
-    borderWidth: 1,
-    borderColor: colors.white30,
-    backgroundColor: "rgba(18,18,18,0.72)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  orbLabel: {
-    color: colors.white,
-    fontSize: 16,
-    fontWeight: "800",
-    letterSpacing: 1.2,
-    textTransform: "uppercase",
-  },
+  content: { flexGrow: 1, padding: 28, paddingTop: 104, paddingBottom: 60 },
+  eyebrow: { color: "#ff9aaa", fontSize: 11, fontWeight: "800", letterSpacing: 2.2, textTransform: "uppercase", marginTop: 20, marginBottom: 12 },
+  title: { color: colors.white, fontSize: 46, lineHeight: 49, fontWeight: "900", letterSpacing: -2, marginTop: 16 },
+  subtitle: { color: "#d8cccf", fontSize: 16, lineHeight: 24, marginTop: 14, maxWidth: 330 },
+  timerNotice: { color: "#ffe0e6", backgroundColor: "#572536", borderLeftWidth: 3, borderLeftColor: "#ff9aaa", borderRadius: 8, padding: 14, fontSize: 15, lineHeight: 22, fontWeight: "700", marginTop: 18 },
+  orbArea: { flexGrow: 1, alignItems: "center", justifyContent: "center", minHeight: 230, marginVertical: 16 },
+  orbGlow: { position: "absolute", width: 190, height: 190, borderRadius: 95, backgroundColor: colors.rose },
+  orb: { width: 154, height: 154, borderRadius: 77, borderWidth: 1, borderColor: "#e9768c", backgroundColor: "#21131a", alignItems: "center", justifyContent: "center" },
+  orbLabel: { color: colors.white, fontSize: 23, fontWeight: "800", letterSpacing: 1.2, textTransform: "uppercase" },
+  activeTimerArea: { flexGrow: 1, minHeight: 280, alignItems: "center", justifyContent: "center", marginVertical: 24 },
+  activeTimerGlow: { position: "absolute", width: 250, height: 250, borderRadius: 125, backgroundColor: "#a71e47" },
+  activeTimer: { width: 220, height: 220, borderRadius: 110, borderWidth: 1, borderColor: "#d76b83", backgroundColor: "#21131a", alignItems: "center", justifyContent: "center", padding: 18 },
+  activeTimerCaption: { color: "#e5bdc8", fontSize: 10, fontWeight: "800", letterSpacing: 1.6 },
+  activeTimerValue: { color: colors.white, fontSize: 52, fontWeight: "900", letterSpacing: -2, marginVertical: 8, fontVariant: ["tabular-nums"] },
+  activeTimerDuration: { color: "#e5bdc8", fontSize: 10, fontWeight: "700", letterSpacing: 1.2 },
+  activeActions: { borderTopWidth: 1, borderTopColor: "#4b3038", paddingTop: 8 },
   launchers: { gap: 12 },
-  configure: { gap: 16 },
-  configureLabel: {
-    color: colors.white50,
-    fontSize: 11,
-    fontWeight: "800",
-    letterSpacing: 1.8,
-    textTransform: "uppercase",
-  },
-  sessionOptions: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
-  sessionOption: {
-    minWidth: 64,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderWidth: 1,
-    borderColor: colors.white20,
-    borderRadius: 24,
-    color: colors.white,
-    fontSize: 14,
-    fontWeight: "800",
-    textAlign: "center",
-  },
-  sessionOptionActive: {
-    borderColor: colors.rose,
-    backgroundColor: "rgba(225,29,72,0.18)",
-  },
-  selectedPlatform: {
-    color: colors.white40,
-    fontSize: 12,
-    fontWeight: "700",
-    letterSpacing: 1.2,
-    textTransform: "uppercase",
-  },
-  beginAction: {
-    color: colors.white,
-    fontSize: 15,
-    fontWeight: "800",
-    letterSpacing: 1.1,
-    marginTop: 4,
-    textTransform: "uppercase",
-  },
-  launcher: {
-    minHeight: 58,
-    borderWidth: 1,
-    borderRadius: 30,
-    backgroundColor: "rgba(255,255,255,0.06)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  launcherText: {
-    color: colors.white,
-    fontSize: 16,
-    fontWeight: "800",
-    letterSpacing: -0.2,
-  },
-  status: {
-    color: colors.white40,
-    fontSize: 12,
-    fontWeight: "700",
-    letterSpacing: 1.2,
-    textTransform: "uppercase",
-    marginTop: 20,
-  },
-  leaveAction: {
-    color: colors.white,
-    fontSize: 14,
-    fontWeight: "800",
-    letterSpacing: 1.2,
-    marginTop: 22,
-    textTransform: "uppercase",
-  },
-  restartAction: {
-    color: colors.white50,
-    fontSize: 12,
-    fontWeight: "700",
-    letterSpacing: 1.1,
-    marginTop: 18,
-    textTransform: "uppercase",
-  },
-  recenterTrack: {
-    height: 58,
-    borderWidth: 1,
-    borderColor: colors.white20,
-    borderRadius: 30,
-    overflow: "hidden",
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: 12,
-  },
-  recenterFill: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(22,163,74,0.22)",
-  },
-  recenterText: {
-    color: colors.white,
-    fontSize: 12,
-    fontWeight: "800",
-    letterSpacing: 1.1,
-    textTransform: "uppercase",
-  },
+  configure: { marginTop: 32 },
+  configureLabel: { color: "#ff9aaa", fontSize: 11, fontWeight: "800", letterSpacing: 1.8, textTransform: "uppercase" },
+  configureHint: { color: "#d8cccf", fontSize: 14, lineHeight: 21, marginTop: 8 },
+  sessionOptions: { flexDirection: "row", flexWrap: "wrap", marginTop: 14, gap: 12 },
+  sessionOption: { width: "46%", flexGrow: 1 },
+  durationChoice: { minHeight: 82, borderBottomWidth: 2, borderBottomColor: "#4b3038", paddingVertical: 8 },
+  durationSelected: { borderBottomColor: "#ff9aaa" },
+  durationDisabled: { opacity: 0.45 },
+  durationValue: { color: "#e1cdd3", fontSize: 30, fontWeight: "800", letterSpacing: -1 },
+  durationValueSelected: { color: "#ff9aaa" },
+  durationUnit: { fontSize: 14, fontWeight: "600", letterSpacing: 0 },
+  durationHint: { color: "#c5b6ba", fontSize: 10, fontWeight: "700", letterSpacing: 1, marginTop: 4 },
+  selectedPlatform: { color: colors.white, fontSize: 22, fontWeight: "800", marginTop: 8, marginBottom: 28 },
+  sessionSummary: { color: "#d8cccf", fontSize: 14, lineHeight: 21, marginTop: 22 },
+  launcher: { minHeight: 64, borderWidth: 1, borderRadius: 20, backgroundColor: "#21161a", alignItems: "center", justifyContent: "center" },
+  launcherText: { color: colors.white, fontSize: 16, fontWeight: "800", letterSpacing: -0.2 },
+  status: { color: colors.white40, fontSize: 12, fontWeight: "700", marginTop: 12 },
   error: { color: colors.rose, fontSize: 12, lineHeight: 18, marginTop: 16 },
 });

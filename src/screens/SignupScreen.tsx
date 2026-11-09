@@ -1,16 +1,8 @@
-import * as AppleAuthentication from "expo-apple-authentication";
-import * as Google from "expo-auth-session/providers/google";
-import {
-  CryptoDigestAlgorithm,
-  digestStringAsync,
-  randomUUID,
-} from "expo-crypto";
-import { Apple, ChevronRight, Chrome } from "lucide-react-native";
-import React, { useEffect, useState } from "react";
+import { ChevronRight } from "lucide-react-native";
+import React, { useRef, useState } from "react";
 import {
   KeyboardAvoidingView,
   Platform,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -26,12 +18,6 @@ import Animated, {
   useSharedValue,
   withSpring,
 } from "react-native-reanimated";
-import { registerProviderAccount } from "../lib/firebase/bootstrap";
-import {
-  googleAndroidClientId,
-  googleIosClientId,
-  googleWebClientId,
-} from "../lib/firebase/config";
 import { firebaseErrorMessage } from "../lib/firebase/errors";
 import { colors } from "../theme/colors";
 import { hapticLight } from "../utils/haptics";
@@ -41,15 +27,17 @@ import {
   validateSignup,
 } from "../utils/signupValidation";
 
+type SignupScreenProps = {
+  onComplete: () => Promise<void>;
+  onBack?: () => void;
+  onSubmit?: (values: SignupValues) => Promise<void>;
+};
+
 export default function SignupScreen({
   onComplete,
   onBack,
   onSubmit,
-}: {
-  onComplete: () => void;
-  onBack?: () => void;
-  onSubmit?: (values: SignupValues) => Promise<void>;
-}) {
+}: SignupScreenProps) {
   const [values, setValues] = useState<SignupValues>({
     name: "",
     surname: "",
@@ -59,122 +47,31 @@ export default function SignupScreen({
   });
   const [errors, setErrors] = useState<SignupErrors>({});
   const [submitting, setSubmitting] = useState(false);
-  const [googleRequest, googleResponse, promptGoogle] = Google.useAuthRequest({
-    clientId: googleWebClientId ?? undefined,
-    androidClientId: googleAndroidClientId ?? undefined,
-    iosClientId: googleIosClientId ?? undefined,
-    webClientId: googleWebClientId ?? undefined,
-    selectAccount: true,
-  });
+  const emailSubmissionInProgress = useRef(false);
   const x = useSharedValue(0);
   const backX = useSharedValue(0);
 
-  useEffect(() => {
-    if (!googleResponse) return;
-    if (googleResponse.type === "cancel" || googleResponse.type === "dismiss") {
-      setSubmitting(false);
-      return;
-    }
-    if (googleResponse.type !== "success") {
-      setErrors({ form: "Google sign up could not be completed." });
-      setSubmitting(false);
-      return;
-    }
-
-    const accessToken = googleResponse.authentication?.accessToken;
-    if (!accessToken) {
-      setErrors({ form: "Google did not return an access token." });
-      setSubmitting(false);
-      return;
-    }
-
-    void registerProviderAccount("google", accessToken)
-      .then(onComplete)
-      .catch((error) => setErrors({ form: firebaseErrorMessage(error) }))
-      .finally(() => setSubmitting(false));
-  }, [googleResponse, onComplete]);
-
-  const startGoogleSignup = async () => {
-    if (!googleRequest || submitting) return;
-    if (!googleAndroidClientId && !googleIosClientId && !googleWebClientId) {
-      setErrors({
-        form: "Google sign up needs a configured OAuth client ID first.",
-      });
-      return;
-    }
-    setErrors({});
-    setSubmitting(true);
-    hapticLight();
-    try {
-      await promptGoogle();
-    } catch (error) {
-      setErrors({ form: firebaseErrorMessage(error) });
-      setSubmitting(false);
-    }
-  };
-
-  const startAppleSignup = async () => {
-    if (submitting) return;
-    if (Platform.OS !== "ios") {
-      setErrors({ form: "Apple sign up is available on iPhone and iPad." });
-      return;
-    }
-    setErrors({});
-    setSubmitting(true);
-    hapticLight();
-    try {
-      const rawNonce = randomUUID();
-      const hashedNonce = await digestStringAsync(
-        CryptoDigestAlgorithm.SHA256,
-        rawNonce,
-      );
-      const credential = await AppleAuthentication.signInAsync({
-        nonce: hashedNonce,
-        requestedScopes: [
-          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
-          AppleAuthentication.AppleAuthenticationScope.EMAIL,
-        ],
-      });
-      if (!credential.identityToken) {
-        throw new Error("Apple did not return a valid identity token.");
-      }
-      await registerProviderAccount(
-        "apple",
-        credential.identityToken,
-        credential.fullName
-          ? AppleAuthentication.formatFullName(credential.fullName)
-          : undefined,
-        credential.email,
-        rawNonce,
-      );
-      onComplete();
-    } catch (error) {
-      if ((error as { code?: string }).code !== "ERR_REQUEST_CANCELED") {
-        setErrors({ form: firebaseErrorMessage(error) });
-      }
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
   const complete = async (submittedValues = values) => {
+    if (emailSubmissionInProgress.current || submitting) return;
     const nextErrors = validateSignup(submittedValues);
     setValues(submittedValues);
     setErrors(nextErrors);
-    if (Object.keys(nextErrors).length > 0 || submitting) {
+    if (Object.keys(nextErrors).length > 0) {
       x.value = withSpring(0, { damping: 15, stiffness: 200 });
       return;
     }
 
+    emailSubmissionInProgress.current = true;
     setSubmitting(true);
     hapticLight();
     try {
       if (onSubmit) await onSubmit(submittedValues);
-      else onComplete();
+      else await onComplete();
     } catch (error) {
       setErrors({ form: firebaseErrorMessage(error) });
       x.value = withSpring(0, { damping: 15, stiffness: 200 });
     } finally {
+      emailSubmissionInProgress.current = false;
       setSubmitting(false);
     }
   };
@@ -239,13 +136,25 @@ export default function SignupScreen({
         <ScrollView
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          alwaysBounceVertical
           showsVerticalScrollIndicator={false}
         >
           {onBack && (
             <GestureDetector gesture={backGesture}>
-              <Animated.Text style={[styles.backLink, backStyle]}>
-                Where to ? →
-              </Animated.Text>
+              <Animated.View
+                accessible
+                accessibilityRole="adjustable"
+                accessibilityLabel="Back to account options"
+                accessibilityActions={[{ name: "activate", label: "Go back" }]}
+                onAccessibilityAction={(event) => {
+                  if (event.nativeEvent.actionName === "activate") onBack();
+                }}
+                onAccessibilityTap={onBack}
+                style={backStyle}
+              >
+                <Text style={styles.backLink}>Where to ? →</Text>
+              </Animated.View>
             </GestureDetector>
           )}
           <Text style={styles.title}>Begin.</Text>
@@ -254,27 +163,9 @@ export default function SignupScreen({
             move forward with renewed attention.
           </Text>
 
-          <View style={styles.socialButtons}>
-            <Pressable
-              onPress={() => void startGoogleSignup()}
-              disabled={submitting}
-              style={styles.socialButton}
-            >
-              <Chrome color={colors.white} size={18} />
-              <Text style={styles.socialButtonText}>continue with google</Text>
-            </Pressable>
-            <Pressable
-              onPress={() => void startAppleSignup()}
-              disabled={submitting}
-              style={styles.socialButton}
-            >
-              <Apple color={colors.white} size={18} />
-              <Text style={styles.socialButtonText}>continue with apple</Text>
-            </Pressable>
-          </View>
-
           <View style={styles.fields}>
             <TextInput
+              accessibilityLabel="Name"
               value={values.name}
               onChangeText={(value) => updateField("name", value)}
               onBlur={() => validateField("name")}
@@ -286,6 +177,7 @@ export default function SignupScreen({
               <Text style={styles.errorText}>{errors.name}</Text>
             )}
             <TextInput
+              accessibilityLabel="Surname"
               value={values.surname}
               onChangeText={(value) => updateField("surname", value)}
               onBlur={() => validateField("surname")}
@@ -297,12 +189,14 @@ export default function SignupScreen({
               <Text style={styles.errorText}>{errors.surname}</Text>
             )}
             <TextInput
+              accessibilityLabel="Email"
               value={values.email}
               onChangeText={(value) => updateField("email", value)}
               onBlur={() => validateField("email")}
               placeholder="Email"
               placeholderTextColor={colors.gray400}
               keyboardType="email-address"
+              returnKeyType="done"
               autoCapitalize="none"
               style={styles.input}
             />
@@ -310,6 +204,8 @@ export default function SignupScreen({
               <Text style={styles.errorText}>{errors.email}</Text>
             )}
             <TextInput
+              accessibilityLabel="Password"
+              accessibilityHint="At least 8 characters, including one capital, one number and one special character."
               value={values.password}
               onChangeText={(value) => updateField("password", value)}
               onBlur={() => validateField("password")}
@@ -334,7 +230,21 @@ export default function SignupScreen({
             <View style={styles.track}>
               <View style={styles.trackDashed} />
               <GestureDetector gesture={gesture}>
-                <Animated.View style={[styles.knob, knobStyle]}>
+                <Animated.View
+                  accessible
+                  accessibilityRole="adjustable"
+                  accessibilityLabel="Agree to terms and create account"
+                  accessibilityHint="Activate to agree to the terms and submit your details."
+                  accessibilityState={{ disabled: submitting }}
+                  accessibilityActions={[{ name: "activate", label: "Agree and create account" }]}
+                  onAccessibilityAction={(event) => {
+                    if (!submitting && event.nativeEvent.actionName === "activate") void complete({ ...values, termsAccepted: true });
+                  }}
+                  onAccessibilityTap={() => {
+                    if (!submitting) void complete({ ...values, termsAccepted: true });
+                  }}
+                  style={[styles.knob, knobStyle]}
+                >
                   <ChevronRight color={colors.white} size={20} />
                 </Animated.View>
               </GestureDetector>
@@ -387,28 +297,6 @@ const styles = StyleSheet.create({
     lineHeight: 24,
     marginBottom: 32,
     maxWidth: 340,
-  },
-  socialButtons: {
-    gap: 10,
-    marginBottom: 30,
-  },
-  socialButton: {
-    minHeight: 50,
-    borderWidth: 1,
-    borderColor: colors.white20,
-    borderRadius: 8,
-    paddingHorizontal: 16,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 10,
-    backgroundColor: "rgba(255,255,255,0.06)",
-  },
-  socialButtonText: {
-    color: colors.white,
-    fontSize: 13,
-    fontWeight: "700",
-    letterSpacing: 0.1,
   },
   fields: {
     gap: 24,

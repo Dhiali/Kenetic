@@ -1,6 +1,6 @@
 import * as Haptics from "expo-haptics";
 import React, { useEffect } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
   runOnJS,
@@ -14,6 +14,78 @@ const triggerForkHaptic = () => {
   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => undefined);
 };
 
+function SwipePath({
+  direction,
+  title,
+  description,
+  action,
+}: {
+  direction: "left" | "right";
+  title: string;
+  description: string;
+  action: () => void;
+}) {
+  const translateX = useSharedValue(0);
+  const isReturn = direction === "left";
+  const gesture = Gesture.Pan()
+    .activeOffsetX([-12, 12])
+    .failOffsetY([-15, 15])
+    .onUpdate((event) => {
+      translateX.value = isReturn
+        ? Math.max(-100, Math.min(0, event.translationX))
+        : Math.min(100, Math.max(0, event.translationX));
+    })
+    .onEnd((event) => {
+      if (isReturn ? event.translationX < -60 : event.translationX > 60) {
+        runOnJS(triggerForkHaptic)();
+        runOnJS(action)();
+      }
+    })
+    .onFinalize(() => {
+      translateX.value = withSpring(0, { damping: 15, stiffness: 200 });
+    });
+
+  const dragStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: translateX.value }],
+  }));
+  const accessibilityLabel = isReturn
+    ? "Return, sign in"
+    : "Begin, create an account";
+  const actionLabel = isReturn ? "Open sign in" : "Open sign up";
+
+  return (
+    <View style={[styles.path, isReturn ? styles.returnPath : styles.beginPath]}>
+      <View style={styles.pathHeading}>
+        <Text style={[styles.pathNumber, isReturn ? styles.returnAccent : styles.beginAccent]}>
+          {isReturn ? "01 / RETURNING" : "02 / NEW HERE"}
+        </Text>
+        <Text style={styles.pathDescription}>{description}</Text>
+      </View>
+      <GestureDetector gesture={gesture}>
+        <Animated.View
+          accessible
+          accessibilityRole="adjustable"
+          accessibilityLabel={accessibilityLabel}
+          accessibilityHint={`Swipe ${direction}, or activate to ${actionLabel.toLowerCase()}.`}
+          accessibilityActions={[{ name: "activate", label: actionLabel }]}
+          onAccessibilityAction={(event) => {
+            if (event.nativeEvent.actionName === "activate") action();
+          }}
+          onAccessibilityTap={action}
+          style={[styles.dragArea, dragStyle]}
+        >
+          {isReturn && <Text style={[styles.arrow, styles.returnAccent]}>{"←"}</Text>}
+          <Text style={[styles.pathTitle, isReturn ? styles.returnAccent : styles.beginAccent]}>
+            {title}
+          </Text>
+          {!isReturn && <Text style={[styles.arrow, styles.beginAccent]}>{"→"}</Text>}
+        </Animated.View>
+      </GestureDetector>
+      <Text style={styles.swipeHint}>SWIPE {direction.toUpperCase()}</Text>
+    </View>
+  );
+}
+
 export default function TheForkScreen({
   onLogin,
   onSignup,
@@ -21,104 +93,39 @@ export default function TheForkScreen({
   onLogin: () => void;
   onSignup: () => void;
 }) {
-  // Screen entrance fade
   const opacity = useSharedValue(0);
-
-  // Individual drag positions
-  const translateXReturn = useSharedValue(0);
-  const translateXBegin = useSharedValue(0);
 
   useEffect(() => {
     opacity.value = withTiming(1, { duration: 800 });
   }, []);
 
-  // --------------------------------------------------------
-  // Gesture 1: "return." (Swipe Left)
-  // --------------------------------------------------------
-  const returnGesture = Gesture.Pan()
-    .onChange((e) => {
-      // If dragging left (correct direction), move 1:1.
-      // If dragging right, add heavy elastic resistance (0.1 ratio).
-      translateXReturn.value =
-        e.translationX < 0 ? e.translationX : e.translationX * 0.1;
-    })
-    .onEnd((e) => {
-      // Threshold to trigger action (-60px)
-      if (e.translationX < -60) {
-        runOnJS(triggerForkHaptic)();
-        runOnJS(onLogin)();
-      } else {
-        // Snap back to zero with a satisfying spring
-        translateXReturn.value = withSpring(0, { damping: 15, stiffness: 200 });
-      }
-    });
-
-  // --------------------------------------------------------
-  // Gesture 2: "begin." (Swipe Right)
-  // --------------------------------------------------------
-  const beginGesture = Gesture.Pan()
-    .onChange((e) => {
-      // If dragging right (correct direction), move 1:1.
-      // If dragging left, add heavy elastic resistance.
-      translateXBegin.value =
-        e.translationX > 0 ? e.translationX : e.translationX * 0.1;
-    })
-    .onEnd((e) => {
-      // Threshold to trigger action (+60px)
-      if (e.translationX > 60) {
-        runOnJS(triggerForkHaptic)();
-        runOnJS(onSignup)();
-      } else {
-        translateXBegin.value = withSpring(0, { damping: 15, stiffness: 200 });
-      }
-    });
-
-  // --------------------------------------------------------
-  // Animated Styles
-  // --------------------------------------------------------
   const screenStyle = useAnimatedStyle(() => ({
     opacity: opacity.value,
   }));
 
-  const returnStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: translateXReturn.value }],
-  }));
-
-  const beginStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: translateXBegin.value }],
-  }));
-
   return (
     <Animated.View style={[styles.container, screenStyle]}>
-      {/* Title */}
-      <View style={styles.header}>
-        <Text style={styles.title}>Where to?</Text>
-      </View>
-
-      {/* Swipe Gates */}
-      <View style={styles.splitContainer}>
-        {/* Left Side: Return (Login) */}
-        <View style={styles.half}>
-          <GestureDetector gesture={returnGesture}>
-            <Animated.View style={returnStyle}>
-              <Text style={[styles.dragText, styles.returnText]}>Return.</Text>
-            </Animated.View>
-          </GestureDetector>
-          <Text style={styles.helperText}>flick left</Text>
+      <ScrollView contentContainerStyle={styles.content}>
+        <View style={styles.header}>
+          <Text style={styles.title}>Where to?</Text>
+          <Text style={styles.footer}>A LITTLE MOVEMENT GOES A LONG WAY.</Text>
         </View>
 
-        <View style={styles.centerDivider} />
-
-        {/* Right Side: Begin (Signup) */}
-        <View style={styles.half}>
-          <GestureDetector gesture={beginGesture}>
-            <Animated.View style={beginStyle}>
-              <Text style={[styles.dragText, styles.beginText]}>Begin.</Text>
-            </Animated.View>
-          </GestureDetector>
-          <Text style={styles.helperText}>flick right</Text>
+        <View style={styles.paths}>
+          <SwipePath
+            direction="left"
+            title="Return."
+            description="Already have an account? Pick up where you left off."
+            action={onLogin}
+          />
+          <SwipePath
+            direction="right"
+            title="Begin."
+            description="New to Kenetic? Let's create your space."
+            action={onSignup}
+          />
         </View>
-      </View>
+      </ScrollView>
     </Animated.View>
   );
 }
@@ -128,53 +135,87 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#121212",
   },
+  content: {
+    flexGrow: 1,
+    paddingHorizontal: 26,
+    paddingTop: 120,
+    paddingBottom: 42,
+  },
   header: {
-    marginTop: 160,
-    alignItems: "center",
-    marginBottom: 40,
+    marginBottom: 38,
   },
   title: {
     color: "#ffffff",
-    fontSize: 42,
+    fontSize: 48,
     fontWeight: "900",
     letterSpacing: -2,
   },
-  splitContainer: {
-    flex: 1,
+  paths: {
+    gap: 16,
+  },
+  path: {
+    borderRadius: 28,
+    borderWidth: 1,
+    paddingHorizontal: 22,
+    paddingVertical: 22,
+    overflow: "hidden",
+  },
+  returnPath: {
+    backgroundColor: "#111e29",
+    borderColor: "#274a62",
+  },
+  beginPath: {
+    backgroundColor: "#112219",
+    borderColor: "#285438",
+  },
+  pathHeading: {
+    gap: 8,
+  },
+  pathNumber: {
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 1.5,
+  },
+  pathDescription: {
+    color: "#d0d0d0",
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  dragArea: {
     flexDirection: "row",
-  },
-  half: {
-    flex: 1,
-    justifyContent: "center",
     alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 16,
+    paddingVertical: 8,
+    minHeight: 60,
   },
-  centerDivider: {
-    width: 1,
-    height: "65%",
-    backgroundColor: "rgba(255, 255, 255, 0.22)",
-    alignSelf: "center",
-  },
-  dragText: {
+  pathTitle: {
     fontSize: 36,
     fontWeight: "800",
     letterSpacing: -1,
-    paddingHorizontal: 20,
-    paddingVertical: 10,
   },
-  returnText: {
-    color: "#2599eb",
+  arrow: {
+    fontSize: 30,
+    fontWeight: "400",
   },
-  beginText: {
-    color: "#16a34a",
+  returnAccent: {
+    color: "#69c3ff",
   },
-  helperText: {
-    marginTop: 12,
-    color: "rgba(255, 255, 255, 0.4)",
+  beginAccent: {
+    color: "#72db94",
+  },
+  swipeHint: {
+    color: "#a9b5ad",
     fontSize: 10,
-    textTransform: "uppercase",
-    fontWeight: "bold",
-    letterSpacing: 2,
-    // Ensure the helper text doesn't steal touches from the drag gesture
-    pointerEvents: "none",
+    fontWeight: "700",
+    letterSpacing: 1.5,
+    marginTop: 8,
+  },
+  footer: {
+    color: "#818181",
+    fontSize: 10,
+    fontWeight: "700",
+    letterSpacing: 1.5,
+    marginTop: 12,
   },
 });

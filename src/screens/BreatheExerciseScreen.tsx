@@ -11,6 +11,7 @@ import {
 } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
+    cancelAnimation,
     Easing,
     FadeIn,
     FadeOut,
@@ -26,7 +27,12 @@ import {
     finishBreatheSession,
     startBreatheSession,
 } from "../lib/firebase/bootstrap";
+import { ensureAnonymousUser } from "../lib/firebase/auth";
 import { firebaseErrorMessage } from "../lib/firebase/errors";
+import { getBreathPhase } from "../lib/focus/breathing";
+import { createCompletionGate } from "../lib/focus/completionGate";
+import { scopedSessionKey } from "../lib/focus/sessionStorage";
+import SwipeAction from "../components/SwipeAction";
 import { colors } from "../theme/colors";
 
 const SESSION_KEY = "@kenetic/breathe-session";
@@ -82,44 +88,24 @@ export default function BreatheExerciseScreen({
   const protocol = protocols[exercise];
   const [phase, setPhase] = useState<Phase>("setup");
   const [sessionId, setSessionId] = useState<string | null>(null);
-  const [remaining, setRemaining] = useState(protocol.duration);
+  const [remaining, setRemaining] = useState<number>(protocol.duration);
   const [sensorReady, setSensorReady] = useState(false);
   const [motionDetected, setMotionDetected] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [finishing, setFinishing] = useState(false);
+  const [restoring, setRestoring] = useState(true);
+  const [restoreFailed, setRestoreFailed] = useState(false);
+  const [completionFailed, setCompletionFailed] = useState(false);
   const [interruptionCount, setInterruptionCount] = useState(0);
   const finishingRef = useRef(false);
+  const completionGate = useRef(createCompletionGate()).current;
+  const startingRef = useRef(false);
+  const keysRef = useRef<string[] | null>(null);
   const lastBreathPhase = useRef<string | null>(null);
   const sessionStart = useRef<number | null>(null);
   const circleScale = useSharedValue(1);
   const circleOpacity = useSharedValue(0.58);
   const setupY = useSharedValue(0);
-
-  const completePersistedSession = async (
-    savedSessionId: string,
-    duration: number,
-    savedExercise: Exercise,
-  ) => {
-    if (finishingRef.current) return;
-    finishingRef.current = true;
-    setFinishing(true);
-    try {
-      await finishBreatheSession(
-        savedSessionId,
-        duration,
-        true,
-        savedExercise,
-        interruptionCount,
-      );
-      await clearSessionStorage();
-      setSessionId(null);
-      setPhase("complete");
-    } catch (completeError) {
-      setError(firebaseErrorMessage(completeError));
-      finishingRef.current = false;
-      setFinishing(false);
-    }
-  };
 
   useEffect(() => {
     circleOpacity.value = withRepeat(
@@ -131,20 +117,25 @@ export default function BreatheExerciseScreen({
       true,
     );
     let mounted = true;
-    void restoreSession().then((saved) => {
-      if (!mounted || !saved || saved.exercise !== exercise) return;
+    void (async () => {
+      const user = await ensureAnonymousUser();
+      const keys = [SESSION_KEY, DEADLINE_KEY, EXERCISE_KEY, DURATION_KEY]
+        .map((key) => scopedSessionKey(key, user.uid, exercise));
+      const saved = await restoreSession(keys);
+      if (!mounted) return;
+      keysRef.current = keys;
+      setRestoring(false);
+      if (!saved) return;
+      if (saved.exercise !== exercise) throw new Error("Saved breathing session does not match this exercise.");
       setSessionId(saved.sessionId);
       setRemaining(saved.remaining);
-      if (saved.remaining <= 0) {
-        void completePersistedSession(
-          saved.sessionId,
-          saved.duration,
-          exercise,
-        );
-      } else {
-        setPhase("active");
-      }
+      setPhase("active");
       sessionStart.current = saved.startedAt;
+    })().catch((restoreError) => {
+      if (!mounted) return;
+      setRestoring(false);
+      setRestoreFailed(true);
+      setError(`Could not restore the breathing session: ${firebaseErrorMessage(restoreError)} Return to Breathe and try again.`);
     });
     return () => {
       mounted = false;
@@ -153,8 +144,11 @@ export default function BreatheExerciseScreen({
 
   useEffect(() => {
     if (phase !== "active") return;
+    lastBreathPhase.current = null;
     const timer = setInterval(() => {
-      void AsyncStorage.getItem(DEADLINE_KEY).then((value) => {
+      const keys = keysRef.current;
+      if (!keys) return;
+      void AsyncStorage.getItem(keys[1]).then((value) => {
         if (!value) return;
         const next = Math.max(
           0,
@@ -163,17 +157,22 @@ export default function BreatheExerciseScreen({
         setRemaining(next);
         animateBreath(protocol.duration - next);
         if (next === 0) void complete();
-      });
+      }).catch((readError) => setError(`Could not read the timer: ${firebaseErrorMessage(readError)}`));
     }, 250);
     return () => clearInterval(timer);
   }, [phase, protocol.duration]);
+
+  useEffect(() => {
+    if (phase === "paused") cancelAnimation(circleScale);
+  }, [phase]);
 
   useEffect(() => {
     if (phase !== "ready" && phase !== "active" && phase !== "paused") return;
     let subscription: { remove: () => void } | undefined;
     let mounted = true;
     void Gyroscope.isAvailableAsync().then((available) => {
-      if (!mounted || !available) {
+      if (!mounted) return;
+      if (!available) {
         setSensorReady(true);
         return;
       }
@@ -192,6 +191,8 @@ export default function BreatheExerciseScreen({
           setPhase("active");
         }
       });
+    }).catch((sensorError) => {
+      if (mounted) setError(`Could not access the motion sensor: ${firebaseErrorMessage(sensorError)}`);
     });
     return () => {
       mounted = false;
@@ -202,29 +203,33 @@ export default function BreatheExerciseScreen({
   useEffect(() => {
     const handleAppState = (next: AppStateStatus) => {
       if (next === "active" && (phase === "active" || phase === "paused"))
-        void restoreSession().then((saved) => {
+        void (keysRef.current ? restoreSession(keysRef.current) : Promise.resolve(null)).then((saved) => {
           if (saved && saved.exercise === exercise) {
             setRemaining(saved.remaining);
             if (saved.remaining <= 0) void complete();
           }
-        });
+        }).catch((restoreError) => setError(`Could not restore the timer: ${firebaseErrorMessage(restoreError)}`));
     };
     const subscription = AppState.addEventListener("change", handleAppState);
     return () => subscription.remove();
   }, [phase, exercise]);
 
   const beginSetup = () => {
+    if (restoring || restoreFailed) return;
     setError(null);
     setPhase("ready");
     triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
   };
 
   const activate = async () => {
+    const keys = keysRef.current;
+    if (startingRef.current || !keys || restoreFailed) return;
     if (!sensorReady) {
       setError("Rest the phone flat on your chest to begin.");
       return;
     }
     setError(null);
+    startingRef.current = true;
     try {
       const nextSessionId = await startBreatheSession(
         exercise,
@@ -232,10 +237,10 @@ export default function BreatheExerciseScreen({
       );
       const deadline = Date.now() + protocol.duration * 1000;
       await AsyncStorage.multiSet([
-        [SESSION_KEY, nextSessionId],
-        [DEADLINE_KEY, String(deadline)],
-        [EXERCISE_KEY, exercise],
-        [DURATION_KEY, String(protocol.duration)],
+        [keys[0], nextSessionId],
+        [keys[1], String(deadline)],
+        [keys[2], exercise],
+        [keys[3], String(protocol.duration)],
       ]);
       setSessionId(nextSessionId);
       sessionStart.current = Date.now();
@@ -244,45 +249,28 @@ export default function BreatheExerciseScreen({
       triggerHaptic(Haptics.ImpactFeedbackStyle.Heavy);
     } catch (activateError) {
       setError(firebaseErrorMessage(activateError));
+    } finally {
+      startingRef.current = false;
     }
   };
 
   const animateBreath = (elapsed: number) => {
-    const cycle = 13;
-    const position = elapsed % cycle;
-    const nextPhase =
-      position < 4
-        ? "primary-inhale"
-        : position < 5
-          ? "secondary-inhale"
-          : position < 11
-            ? "exhale"
-            : "rest";
-    const phaseChanged = lastBreathPhase.current !== nextPhase;
-    lastBreathPhase.current = nextPhase;
-
-    if (position < 4) {
-      circleScale.value = withTiming(1.55, {
-        duration: 4000,
-        easing: Easing.inOut(Easing.ease),
-      });
-    } else if (position < 5) {
-      circleScale.value = withTiming(2.05, { duration: 1000 });
-      if (phaseChanged) triggerHaptic(Haptics.ImpactFeedbackStyle.Light);
-    } else if (position < 11) {
-      circleScale.value = withTiming(0.28, {
-        duration: 6000,
-        easing: Easing.out(Easing.ease),
-      });
-    } else {
-      circleScale.value = withTiming(0.2, { duration: 2000 });
-    }
+    const breath = getBreathPhase(exercise, elapsed);
+    if (lastBreathPhase.current === breath.key) return;
+    lastBreathPhase.current = breath.key;
+    circleScale.value = withTiming(breath.scale, {
+      duration: breath.remainingSeconds * 1000,
+      easing: Easing.inOut(Easing.ease),
+    });
+    triggerHaptic(Haptics.ImpactFeedbackStyle.Light);
   };
 
-  const complete = async () => {
-    if (finishingRef.current || !sessionId) return;
+  const complete = async (retry = false) => {
+    if (finishingRef.current || !sessionId || !completionGate.start(retry)) return;
     finishingRef.current = true;
     setFinishing(true);
+    setCompletionFailed(false);
+    setError(null);
     try {
       await finishBreatheSession(
         sessionId,
@@ -291,21 +279,27 @@ export default function BreatheExerciseScreen({
         exercise,
         interruptionCount,
       );
-      await clearSessionStorage();
+      if (keysRef.current) await clearSessionStorage(keysRef.current);
       setPhase("complete");
       setSessionId(null);
       triggerHaptic(Haptics.ImpactFeedbackStyle.Heavy);
       setTimeout(() => triggerHaptic(Haptics.ImpactFeedbackStyle.Heavy), 220);
       setTimeout(() => triggerHaptic(Haptics.ImpactFeedbackStyle.Heavy), 440);
     } catch (completeError) {
-      setError(firebaseErrorMessage(completeError));
+      completionGate.fail();
+      setCompletionFailed(true);
+      setError(`Could not save your completed session: ${firebaseErrorMessage(completeError)}`);
       finishingRef.current = false;
       setFinishing(false);
     }
   };
 
   const leave = async () => {
-    if (finishingRef.current) return;
+    if (finishingRef.current || startingRef.current || restoring) return;
+    if (completionFailed) {
+      onBack();
+      return;
+    }
     finishingRef.current = true;
     try {
       if (sessionId) {
@@ -317,7 +311,7 @@ export default function BreatheExerciseScreen({
           interruptionCount,
         );
       }
-      await clearSessionStorage();
+      if (sessionId && keysRef.current) await clearSessionStorage(keysRef.current);
       onBack();
     } catch (leaveError) {
       setError(firebaseErrorMessage(leaveError));
@@ -327,6 +321,10 @@ export default function BreatheExerciseScreen({
   };
 
   const exitExercise = async () => {
+    if (phase === "complete" || restoreFailed) {
+      onBack();
+      return;
+    }
     await leave();
   };
 
@@ -423,7 +421,7 @@ export default function BreatheExerciseScreen({
             </Text>
           </View>
         </View>
-        {phase === "setup" && (
+        {phase === "setup" && !restoring && !restoreFailed && !finishing && (
           <GestureDetector
             gesture={Gesture.Pan()
               .onUpdate((event) => {
@@ -447,20 +445,14 @@ export default function BreatheExerciseScreen({
             </Animated.Text>
           </GestureDetector>
         )}
-        {phase === "active" && (
-          <Text style={styles.leave} onPress={() => void leave()}>
-            leave exercise →
-          </Text>
+        {completionFailed && (
+          <SwipeAction label="retry saving completed session" onActivate={() => void complete(true)} disabled={finishing} />
         )}
-        {phase === "paused" && (
-          <Text style={styles.leave} onPress={() => void leave()}>
-            leave exercise →
-          </Text>
+        {(phase === "active" || phase === "paused") && !completionFailed && (
+          <SwipeAction label="leave exercise" onActivate={() => void leave()} />
         )}
         {phase === "complete" && (
-          <Text style={[styles.leave, styles.darkText]} onPress={onBack}>
-            return to breathe state →
-          </Text>
+          <SwipeAction label="return to breathe state" onActivate={onBack} tone="light" />
         )}
         {error && <Text style={styles.error}>{error}</Text>}
       </View>
@@ -479,11 +471,15 @@ export default function BreatheExerciseScreen({
   );
 }
 
-async function restoreSession() {
+async function restoreSession(keys: string[]) {
   const [sessionId, deadline, exercise, duration] = await AsyncStorage.multiGet(
-    [SESSION_KEY, DEADLINE_KEY, EXERCISE_KEY, DURATION_KEY],
+    keys,
   ).then((entries) => entries.map(([, value]) => value));
-  if (!sessionId || !deadline || !exercise) return null;
+  if ([sessionId, deadline, exercise, duration].every((value) => value === null)) return null;
+  if (!sessionId || !deadline || !exercise || !duration) throw new Error("Saved breathing session is incomplete.");
+  if (!Number.isFinite(Number(deadline)) || !duration || !Number.isFinite(Number(duration)) || Number(duration) <= 0) {
+    throw new Error("Saved breathing timer is invalid.");
+  }
   return {
     sessionId,
     exercise,
@@ -493,13 +489,8 @@ async function restoreSession() {
   };
 }
 
-function clearSessionStorage() {
-  return AsyncStorage.multiRemove([
-    SESSION_KEY,
-    DEADLINE_KEY,
-    EXERCISE_KEY,
-    DURATION_KEY,
-  ]);
+function clearSessionStorage(keys: string[]) {
+  return AsyncStorage.multiRemove(keys);
 }
 function formatTime(seconds: number) {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
@@ -583,7 +574,7 @@ const styles = StyleSheet.create({
     paddingVertical: 20,
   },
   readyGestureOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     zIndex: 20,
   },
   timer: {
