@@ -1,6 +1,6 @@
 # kenetic
 
-![Kenetic splash screen on an iPhone](assets/images/readme-header.png)
+![Kenetic mobile wellbeing app header](assets/images/keneticheader.png)
 
 kenetic is a mobile wellbeing and environmental-awareness app built around
 small physical actions. It helps users move between focused work, breathing
