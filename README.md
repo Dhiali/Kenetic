@@ -437,9 +437,13 @@ All rights reserved.
 
 ## Acknowledgments
 
-Thanks to Tsungai Katsuro, William Basson, AI tools including Google Gemini
-and ChatGPT, and the Stack Overflow community for their support and
-contributions.
+Thanks to Tsungai Katsuro and William Basson for their support and
+contributions. We also acknowledge these AI tools and the Stack Overflow
+community:
+
+[![Google Gemini](https://img.shields.io/badge/Google%20Gemini-4285F4?logo=googlegemini&logoColor=white)](https://gemini.google.com/)
+[![ChatGPT](https://img.shields.io/badge/ChatGPT-412991?logo=openai&logoColor=white)](https://chatgpt.com/)
+[![Stack Overflow](https://img.shields.io/badge/Stack%20Overflow-F58025?logo=stackoverflow&logoColor=white)](https://stackoverflow.com/)
 
 ## Author
 
