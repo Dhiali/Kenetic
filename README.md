@@ -28,7 +28,10 @@
   - [System Architecture](#system-architecture)
   - [Data Model](#data-model)
   - [Iteration and Verification](#iteration-and-verification)
-- [Demo](#demo)
+- [Final Outcome](#final-outcome)
+  - [Before and After](#before-and-after)
+  - [Demo Video](#demo-video)
+  - [Test Coverage and Results](#test-coverage-and-results)
 - [Product Overview](#product-overview)
   - [Focus](#focus)
   - [Breathe](#breathe)
@@ -521,9 +524,73 @@ authentication, and UI conventions; iOS bundling was also checked. Android
 and screen-reader device testing were not included in that walkthrough, so the
 project should not be presented as fully verified on those platforms.
 
-## Demo
+## Final Outcome
 
-Demo video: **[Google Drive demo link](https://drive.google.com/file/d/1YRzw8xiRb9WkZUY4YqnlT9OEe4CRp3Xo/view?usp=sharing)**
+Kenetic brings Focus, Breathe, and Outdoors together in a mobile app designed
+around small, intentional actions. Users can complete guided activities,
+revisit their progress, and save discoveries and places to their account.
+
+### Before and After
+
+This comparison uses **8 November 2026 at 04:08 (UTC+02:00)** as the
+48-hour cutoff, measured from 10 November 2026 at 04:08. The "before" is the
+latest commit before that cutoff, from 27 August 2026. The "after" summarises
+the changes reflected in the recent commits and the current README. Git
+records when changes were committed, not necessarily when each edit was made,
+so this is a snapshot comparison rather than an exact log of work hours.
+
+| Area | Before | After |
+| --- | --- | --- |
+| **Foundation** | A React Native and Expo SDK 54 app with authentication, onboarding, a state dashboard, and Firebase-backed data. | Upgraded to Expo SDK 58 and React Native 0.88, with a mobile-only configuration, updated app branding, and an app-specific TypeScript check. |
+| **Interface** | Focus, Breathe, and Outdoors had their core screens and gesture-led identity. | Refined the account, onboarding, dashboard, Focus, Breathe, and Outdoors screens with more consistent cards, navigation, animation, and capitalisation. |
+| **Focus** | Focus activities and locally generated Alien Mode suggestions were available. | Get Shit Done opens the selected music service and starts its timer when the user returns. Alien Mode uses AI-generated steps, selectable short timers, and recoverable plans. |
+| **Breathe** | Guided breathing exercises and session tracking were present. | Exercise rhythms and screens were refined, with flexible or chest-based guidance and account-scoped session recovery. |
+| **Bio Radar and quizzes** | Bio Radar used deterministic local matching, while quizzes used local question content. | Bio Radar analyses photos through the hosted AI service. Quizzes include curated nature questions and recall questions based on saved discovery descriptions. |
+| **Places and challenges** | Spot Finder and Daily Challenges were described as reserved features. | Spot Keeper supports manually saving, editing, and deleting places. Daily Challenges save progress and completed history, congratulate users, and refresh on a rolling 24-hour schedule. |
+| **Accounts and reliability** | Firebase authentication and user-owned records were in place. | Account restoration, sign-out, session recovery, failed-save retries, and error reporting were improved. AI use now requires a shared, revocable account agreement. |
+| **Documentation and checks** | The project had a README and demo link. | The README now includes setup instructions, feature mockup prompts, design decisions, diagrams, and verification results. Automated tests and Firebase rules tests were added. |
+
+These are representative changes, not a claim that every feature or platform
+has been exhaustively tested. See [Test Coverage and Results](#test-coverage-and-results)
+and [Known Product Boundaries](#known-product-boundaries).
+
+### Demo Video
+
+Watch the **[Kenetic demo on Google Drive](https://drive.google.com/file/d/1YRzw8xiRb9WkZUY4YqnlT9OEe4CRp3Xo/view?usp=sharing)**.
+
+### Test Coverage and Results
+
+The automated checks below were run on **10 November 2026**. The iPhone
+walkthrough was completed separately.
+
+| Check | Result | Scope |
+| --- | --- | --- |
+| Automated tests | 48 passed, 0 failed, 0 skipped | All 16 non-emulator test files |
+| App TypeScript check | Passed | Application type-check |
+| iPhone walkthrough | Features tested by the project owner | Manual interaction on an iPhone |
+
+The automated tests cover selected account restoration and logout, AI consent
+and Worker validation, focus and breathing timers, session recovery, saved
+places, quizzes, daily challenges, and UI conventions. Some use mocks or
+source-level checks rather than a running app or live services.
+
+The 48 passing tests are a **test result, not a code-coverage percentage**.
+An app-wide line or branch coverage percentage has not been measured. The
+Firestore and Storage emulator rule tests were not included in this run.
+Android and screen-reader device testing were also not included in the iPhone
+walkthrough.
+
+To reproduce the non-emulator test run in PowerShell from the project root:
+
+```powershell
+$files = Get-ChildItem scripts -File |
+  Where-Object { $_.Name -match '^test-.*\.(cjs|mjs)$' -and $_.Name -notin @('test-firestore-rules.cjs', 'test-storage-rules.cjs') } |
+  ForEach-Object { $_.FullName }
+node --test $files
+npm run typecheck:app
+```
+
+See [Verification](#verification) for the emulator tests and further checks.
 
 ## Product Overview
 
