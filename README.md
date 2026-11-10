@@ -9,6 +9,17 @@
 - [Installation](#installation)
   - [Prerequisites](#prerequisites)
   - [How to Install](#how-to-install)
+- [Features](#features)
+  - [Account and Onboarding](#account-and-onboarding)
+  - [State Dashboard](#state-dashboard)
+  - [Get Shit Done](#get-shit-done)
+  - [Alien Mode](#alien-mode)
+  - [Guided Breathing](#guided-breathing)
+  - [Bio Radar](#bio-radar)
+  - [Curiosity Quizzes](#curiosity-quizzes)
+  - [Spot Keeper](#spot-keeper)
+  - [Daily Challenges](#daily-challenges)
+  - [Activity and Profile](#activity-and-profile)
 - [Demo](#demo)
 - [Product Overview](#product-overview)
   - [Focus](#focus)
@@ -236,6 +247,97 @@ set `EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME` and
 client configuration; configure the preset's restrictions appropriately and
 review the provider's usage limits. Restart Expo and reload the app after editing
 the file.
+
+## Features
+
+The screenshot notes below identify the screens to capture for the feature
+mockups. Add your finished mockups here when they are ready.
+
+### Account and Onboarding
+
+Users can create an account or sign in with email and password, choose an
+initial intention, and complete the onboarding flow. Signed-in users can resume
+their saved progress when they return.
+
+**Mockup screenshot:** Capture the **Where to?** screen showing the Return and
+Begin choices.
+
+### State Dashboard
+
+The dashboard offers three paths—Focus, Breathe, and Outdoors. Users drag a
+state upward to enter its activities.
+
+**Mockup screenshot:** Capture the main dashboard with all three state choices
+visible.
+
+### Get Shit Done
+
+Users choose Apple Music or Spotify and a focus duration. The focus timer starts
+when they return to Kenetic after opening their music app.
+
+**Mockup screenshot:** Capture the **Stay with it** screen while a focus timer
+is running.
+
+### Alien Mode
+
+With the user's agreement, Alien Mode sends an overwhelming task to the AI
+service and presents small suggested steps. Users choose a 1–10 minute focus
+session, finish a step, and review the next one.
+
+**Mockup screenshot:** Capture the **Start small** screen showing the first
+suggested step and focus-time choices.
+
+### Guided Breathing
+
+Four guided practices offer visual and haptic cues. Users can choose flexible
+guidance or chest-based, motion-sensitive guidance before starting.
+
+**Mockup screenshot:** Capture an active breathing session showing the
+countdown and current breathing cue.
+
+### Bio Radar
+
+After AI consent, users photograph something in nature and receive a possible
+discovery with a description and uncertainty. Saved descriptions can later be
+used in quizzes. Results are AI estimates, not verified identifications or
+safety advice.
+
+**Mockup screenshot:** Capture the **Possible discovery** result card with its
+description and Save action.
+
+### Curiosity Quizzes
+
+Users revisit descriptions saved through Bio Radar and answer curated
+general-nature questions. Answers are saved, and daily questions refresh at
+midnight UTC.
+
+**Mockup screenshot:** Capture a quiz question with its answer choices visible,
+preferably one based on a saved Bio Radar discovery.
+
+### Spot Keeper
+
+Users manually save, rename, and delete places they want to revisit. Spot Keeper
+does not search for nearby places.
+
+**Mockup screenshot:** Capture **Spot keeper** with at least one saved place
+visible.
+
+### Daily Challenges
+
+Each account receives a grounding activity for a rolling 24-hour window. A
+countdown shows when the next challenge arrives, and completed challenges are
+saved in a history list.
+
+**Mockup screenshot:** Capture **A moment outside** after completing a
+challenge, showing the countdown and completed-challenge list.
+
+### Activity and Profile
+
+The state dashboards show saved activity, while Profile lets users manage
+their account and review or withdraw their AI agreement.
+
+**Mockup screenshot:** Capture **Your focus activity** on the Focus dashboard
+with its recent activity and mode breakdown visible.
 
 ## Demo
 
