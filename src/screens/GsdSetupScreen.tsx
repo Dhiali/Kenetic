@@ -246,26 +246,26 @@ export default function GsdSetupScreen({ onBack }: { onBack: () => void }) {
   return (
     <Animated.View entering={FadeIn.duration(500)} exiting={FadeOut.duration(300)} style={styles.screen}>
       <ScrollView contentContainerStyle={styles.content}>
-        {state !== "session" && <SwipeAction label="back to focus" disabled={busy} onActivate={exitToFocus} />}
+        {state !== "session" && <SwipeAction label="Back to focus" disabled={busy} onActivate={exitToFocus} />}
         {state === "setup" && <>
-          <Text style={styles.title}>get shit done.</Text>
+          <Text style={styles.title}>Get shit done.</Text>
           <Text style={styles.subtitle}>Choose your sound tether. Drag it upward to set your session.</Text>
         </>}
         {state === "configure" && <>
           <Text style={styles.eyebrow}>GET SHIT DONE / SESSION SETUP</Text>
-          <Text style={styles.title}>set your session.</Text>
+          <Text style={styles.title}>Set your session.</Text>
           <Text style={styles.subtitle}>Choose your focus time, then open your music.</Text>
           <Text style={styles.timerNotice}>Your timer starts when you return to Kenetic.</Text>
         </>}
         {state === "handoff" && <>
-          <Text style={styles.eyebrow}>sound tether</Text>
-          <Text style={styles.title}>queue your sound.</Text>
+          <Text style={styles.eyebrow}>Sound tether</Text>
+          <Text style={styles.title}>Queue your sound.</Text>
           <Text style={styles.subtitle}>Choose your music, then return to Kenetic.</Text>
           <Text style={styles.timerNotice}>Your timer starts when you return to Kenetic.</Text>
         </>}
         {state === "session" && <>
-          <Text style={styles.eyebrow}>focus in progress</Text>
-          <Text style={styles.title}>stay with it.</Text>
+          <Text style={styles.eyebrow}>Focus in progress</Text>
+          <Text style={styles.title}>Stay with it.</Text>
           <Text style={styles.subtitle}>One moment at a time. Your focus session is underway.</Text>
           <View style={styles.activeTimerArea}>
             <Animated.View pointerEvents="none" style={[styles.activeTimerGlow, orbStyle]} />
@@ -284,19 +284,19 @@ export default function GsdSetupScreen({ onBack }: { onBack: () => void }) {
           </View>
         </>}
         {state === "complete" && <>
-          <Text style={styles.eyebrow}>session complete</Text>
-          <Text style={styles.title}>congratulations.</Text>
+          <Text style={styles.eyebrow}>Session complete</Text>
+          <Text style={styles.title}>Congratulations.</Text>
           <Text style={styles.subtitle}>You completed your {plannedMinutes}-minute focus session.</Text>
         </>}
         {state !== "configure" && state !== "session" && <View style={styles.orbArea}>
           <Animated.View style={[styles.orbGlow, orbStyle]} />
           <View style={styles.orb}>
-            <Text style={styles.orbLabel}>{state === "complete" ? "done" : state === "handoff" ? "ready" : "focus"}</Text>
+            <Text style={styles.orbLabel}>{state === "complete" ? "Done" : state === "handoff" ? "Ready" : "Focus"}</Text>
           </View>
         </View>}
         {state === "setup" && <View style={styles.launchers}>
-          <Launcher label="choose spotify" color={colors.green} disabled={busy || restoreFailed} onLaunch={() => { setPlatform("spotify"); setPlannedMinutes(25); setState("configure"); setError(null); }} />
-          <Launcher label="choose apple music" color={colors.rose} disabled={busy || restoreFailed} onLaunch={() => { setPlatform("apple-music"); setPlannedMinutes(25); setState("configure"); setError(null); }} />
+          <Launcher label="Choose Spotify" color={colors.green} disabled={busy || restoreFailed} onLaunch={() => { setPlatform("spotify"); setPlannedMinutes(25); setState("configure"); setError(null); }} />
+          <Launcher label="Choose Apple Music" color={colors.rose} disabled={busy || restoreFailed} onLaunch={() => { setPlatform("apple-music"); setPlannedMinutes(25); setState("configure"); setError(null); }} />
         </View>}
         {state === "configure" && <View style={styles.configure}>
           <Text style={styles.configureLabel}>YOUR SOUND</Text>
@@ -315,15 +315,15 @@ export default function GsdSetupScreen({ onBack }: { onBack: () => void }) {
             ))}
           </View>
           <Text style={styles.sessionSummary}>Ready for {plannedMinutes} minutes of focus.</Text>
-          <SwipeAction label="open music" disabled={busy} onActivate={() => void beginHandoff()} />
+          <SwipeAction label="Open music" disabled={busy} onActivate={() => void beginHandoff()} />
         </View>}
-        {state === "handoff" && retryTimer && <SwipeAction label="retry starting timer" disabled={busy} onActivate={() => void startOnReturn()} />}
-        {state === "handoff" && readyToRetry && !retryTimer && <SwipeAction label="open music again" disabled={busy} onActivate={() => void retryHandoff()} />}
+        {state === "handoff" && retryTimer && <SwipeAction label="Retry starting timer" disabled={busy} onActivate={() => void startOnReturn()} />}
+        {state === "handoff" && readyToRetry && !retryTimer && <SwipeAction label="Open music again" disabled={busy} onActivate={() => void retryHandoff()} />}
         {state === "session" && <View style={styles.activeActions}>
-          <SwipeAction label={remaining === 0 ? "retry saving session" : "leave session"} disabled={busy} onActivate={() => void finishSession(remaining === 0)} />
+          <SwipeAction label={remaining === 0 ? "Retry saving session" : "Leave session"} disabled={busy} onActivate={() => void finishSession(remaining === 0)} />
         </View>}
-        {state === "complete" && <SwipeAction label="return to focus state" onActivate={onBack} />}
-        {busy && <Text style={styles.status}>please wait...</Text>}
+        {state === "complete" && <SwipeAction label="Return to focus state" onActivate={onBack} />}
+        {busy && <Text style={styles.status}>Please wait...</Text>}
         {error && <Text accessibilityLiveRegion="polite" style={styles.error}>{error}</Text>}
       </ScrollView>
     </Animated.View>

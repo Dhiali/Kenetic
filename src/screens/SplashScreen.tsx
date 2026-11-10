@@ -117,7 +117,7 @@ export default function SplashScreen({
           Kenetic.
         </Animated.Text>
         <Animated.Text style={[styles.tagline, taglineAnimatedStyle]}>
-          we inspire movement.
+          We inspire movement.
         </Animated.Text>
       </View>
     </Animated.View>

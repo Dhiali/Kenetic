@@ -41,6 +41,7 @@ export default function OutdoorsDashboard({
     activeLearningDays: 0,
   });
   const [metricsError, setMetricsError] = React.useState(false);
+  const [metricsLoaded, setMetricsLoaded] = React.useState(false);
   const [reloadToken, setReloadToken] = React.useState(0);
   const auraScale = useSharedValue(1);
   const auraMorph = useSharedValue(0);
@@ -48,17 +49,22 @@ export default function OutdoorsDashboard({
   const metricsReveal = useSharedValue(0);
 
   useEffect(() => {
+    let active = true;
     metricsReveal.value = 0;
+    setMetricsLoaded(false);
+    setMetricsError(false);
     void loadOutdoorDashboardMetrics()
       .then((result) => {
+        if (!active) return;
         setMetrics(result);
-        setMetricsError(false);
+        setMetricsLoaded(true);
         metricsReveal.value = withTiming(1, {
           duration: 520,
           easing: Easing.out(Easing.cubic),
         });
       })
-      .catch(() => setMetricsError(true));
+      .catch(() => { if (active) setMetricsError(true); });
+    return () => { active = false; };
   }, [reloadToken]);
 
   useEffect(() => {
@@ -121,7 +127,7 @@ export default function OutdoorsDashboard({
       style={[styles.screen, screenStyle]}
       entering={FadeIn.duration(500)}
     >
-      <Animated.View style={[styles.aura, auraStyle]}>
+      <Animated.View pointerEvents="none" style={[styles.aura, auraStyle]}>
         <LinearGradient
           colors={["#14532d", "#16a34a", "rgba(22,163,74,0)"]}
           locations={[0, 0.48, 1]}
@@ -140,65 +146,65 @@ export default function OutdoorsDashboard({
         showsVerticalScrollIndicator={false}
       >
         <GestureDetector gesture={exitGesture}>
-          <View style={styles.nav}>
-            <Text style={styles.back}>← Dashboard </Text>
-            <Text style={styles.hint}>(drag right to exit outdoors state)</Text>
+          <View
+            accessible
+            accessibilityRole="adjustable"
+            accessibilityLabel="Return to dashboard"
+            accessibilityHint="Drag right, or activate to leave Outdoors."
+            accessibilityActions={[{ name: "activate", label: "Return to dashboard" }]}
+            onAccessibilityAction={(event) => {
+              if (event.nativeEvent.actionName === "activate") onBack();
+            }}
+            onAccessibilityTap={onBack}
+            style={styles.nav}
+          >
+            <Text style={styles.back}>Dashboard → </Text>
+            <Text style={styles.hint}>(Drag right to exit outdoors state)</Text>
           </View>
         </GestureDetector>
         <Text style={styles.title}>Outdoors state.</Text>
-        <Text style={styles.manifesto}>
-          Connecting with yourself and the environment around you through the
-          practice of ecotherapy and somatic movement.
-        </Text>
-        <Animated.View style={[styles.metrics, metricsRevealStyle]}>
-          <Metric
-            value={`${metrics.speciesScanned}`}
-            label="discoveries saved"
-          />
-          <Metric
-            value={`${metrics.quizAttempts}`}
-            label="curiosity quiz answers logged"
-          />
-          <Metric
-            value={`${metrics.masteryIndex}%`}
-            label="knowledge retention / mastery index"
-          />
-          <Metric
-            value={`${metrics.activeLearningDays}`}
-            label="active learning days this week"
-          />
-        </Animated.View>
-        {metricsError && (
-          <SwipeAction label="Ledger unavailable. Retry" onActivate={retryMetrics} />
-        )}
+        <Text style={styles.manifesto}>Find a little space to explore, learn, and reconnect with nature.</Text>
         <View style={styles.gateways}>
           <Gateway
             title="Bio Radar."
-            label="photo nature discovery"
+            label="Photo nature discovery"
             description="Use a photo to explore AI-suggested nature discoveries. Results are uncertain and not safety advice."
             onLaunch={onBioRadar}
           />
           <Gateway
             title="Curiosity Quizzes."
-            label="adaptive knowledge retention"
-            description="Explore daily general-nature questions and eligible older discovery cards."
+            label="Discovery & nature recall"
+            description="Revisit your Bio Radar discoveries and explore daily nature questions."
             onLaunch={onCuriosity}
           />
           <Gateway
-            title="Spot Finder."
-            label="trails, waters & sanctuaries"
-            description="Save places you find calming. Optional nearby search uses Google Places and requires separate configuration."
+            title="Spot Keeper."
+            label="Trails, waters & sanctuaries"
+            description="Save and revisit places you find calming."
             onLaunch={onSpotFinder}
           />
           <Gateway
             title="Daily Challenges."
-            label="everyday outdoor grounding"
+            label="Everyday outdoor grounding"
             description={
               'Simple, perceptive tasks for an ordinary day outside (e.g., "Find a natural pattern that mimics a fish" or "Locate three distinct bark textures").'
             }
             onLaunch={onChallenges}
           />
         </View>
+        <Text style={styles.statsHeading}>YOUR OUTDOOR ACTIVITY</Text>
+        {!metricsLoaded && !metricsError && <Text style={styles.loading}>Loading your activity...</Text>}
+        {metricsLoaded && (
+          <Animated.View style={[styles.metrics, metricsRevealStyle]}>
+            <Metric value={`${metrics.speciesScanned}`} label="Discoveries saved" />
+            <Metric value={`${metrics.quizAttempts}`} label="Quiz answers logged" />
+            <Metric value={`${metrics.masteryIndex}%`} label="Knowledge mastery" />
+            <Metric value={`${metrics.activeLearningDays}`} label="Learning days this week" />
+          </Animated.View>
+        )}
+        {metricsError && (
+          <SwipeAction label="Outdoor statistics unavailable. Retry" onActivate={retryMetrics} />
+        )}
       </ScrollView>
     </Animated.View>
   );
@@ -225,7 +231,6 @@ function Gateway({
   onLaunch: () => void;
 }) {
   const x = useSharedValue(0);
-  const y = useSharedValue(0);
   const active = useSharedValue(false);
 
   const triggerLightHaptic = () => {
@@ -235,35 +240,47 @@ function Gateway({
   };
 
   const gesture = Gesture.Pan()
+    .activeOffsetX([-12, 12])
+    .failOffsetY([-15, 15])
     .onStart(() => {
       active.value = true;
       runOnJS(triggerLightHaptic)();
     })
     .onUpdate((event) => {
-      x.value = Math.min(0, event.translationX);
-      y.value = Math.min(0, event.translationY);
+      x.value = Math.max(-100, Math.min(0, event.translationX));
     })
     .onEnd((event) => {
-      active.value = false;
       if (event.translationX < -80) runOnJS(onLaunch)();
+    })
+    .onFinalize(() => {
+      active.value = false;
       x.value = withSpring(0, { damping: 16, stiffness: 180 });
-      y.value = withSpring(0, { damping: 16, stiffness: 180 });
     });
   const style = useAnimatedStyle(() => ({
     transform: [
       { translateX: x.value },
-      { translateY: y.value },
-      { scale: active.value ? 1.03 : 1 },
+      { scale: active.value ? 1.02 : 1 },
     ],
     opacity: active.value ? 0.88 : 1,
   }));
   return (
     <GestureDetector gesture={gesture}>
-      <Animated.View style={[styles.gateway, style]}>
+      <Animated.View
+        accessible
+        accessibilityRole="adjustable"
+        accessibilityLabel={`Open ${title}`}
+        accessibilityHint="Swipe left or activate to open."
+        accessibilityActions={[{ name: "activate", label: `Open ${title}` }]}
+        onAccessibilityAction={(event) => {
+          if (event.nativeEvent.actionName === "activate") onLaunch();
+        }}
+        onAccessibilityTap={onLaunch}
+        style={[styles.gateway, style]}
+      >
         <Text style={styles.gatewayTitle}>{title}</Text>
         <Text style={styles.gatewayLabel}>{label}</Text>
         <Text style={styles.gatewayDescription}>{description}</Text>
-        <Text style={styles.gatewayHint}>← swipe to open</Text>
+        <Text style={styles.gatewayHint}>        ← Swipe to open</Text>
       </Animated.View>
     </GestureDetector>
   );
@@ -285,57 +302,49 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 14 },
     elevation: 18,
   },
-  content: { padding: 28, paddingTop: 48, paddingBottom: 48 },
+  content: { padding: 28, paddingTop: 104, paddingBottom: 72 },
   nav: {
     flexDirection: "row",
     alignItems: "center",
     paddingVertical: 12,
-    marginTop: 60,
-    marginBottom: 24,
+    marginBottom: 32,
   },
-  back: { color: "#16a34a", fontSize: 15, fontWeight: "700" },
-  hint: { color: "rgba(255,255,255,0.35)", fontSize: 13, fontWeight: "500" },
+  back: { color: "#a5e9bb", fontSize: 15, fontWeight: "700" },
+  hint: { color: "#b9cbbf", fontSize: 12, fontWeight: "500", flexShrink: 1 },
   title: {
     color: "#fff",
     fontSize: 52,
     lineHeight: 54,
     fontWeight: "900",
     letterSpacing: -2,
-    marginBottom: 36,
+    marginBottom: 10,
   },
   manifesto: {
-    color: "rgba(255,255,255,0.62)",
-    fontSize: 15,
-    lineHeight: 23,
-    marginTop: -20,
-    marginBottom: 32,
+    color: "#cfdfd4",
+    fontSize: 16,
+    lineHeight: 24,
+    marginBottom: 30,
   },
-  metrics: { gap: 18, marginBottom: 64 },
-  metricsError: {
-    color: "rgba(255,255,255,0.5)",
-    fontSize: 12,
-    lineHeight: 18,
-    marginTop: -48,
-    marginBottom: 48,
-  },
-  metric: { flexDirection: "row", alignItems: "baseline", gap: 14 },
+  statsHeading: { color: "#a5e9bb", fontSize: 11, letterSpacing: 1.6, fontWeight: "800", marginTop: 42, marginBottom: 18 },
+  loading: { color: "#c5d5c9", fontSize: 14 },
+  metrics: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  metric: { width: "48%", flexGrow: 1, backgroundColor: "#142018", borderRadius: 16, padding: 15, minHeight: 95 },
   metricValue: {
     color: "#fff",
-    fontSize: 48,
+    fontSize: 30,
     fontWeight: "900",
     letterSpacing: -2,
-    minWidth: 110,
   },
   metricLabel: {
-    color: "rgba(255,255,255,0.45)",
+    color: "#bfd0c3",
     fontSize: 11,
     fontWeight: "700",
     letterSpacing: 1.3,
     textTransform: "uppercase",
     flexShrink: 1,
   },
-  gateways: { gap: 40 },
-  gateway: { borderTopWidth: 1, borderTopColor: "#242424", paddingTop: 24 },
+  gateways: { gap: 14 },
+  gateway: { borderWidth: 1, borderColor: "#346348", borderRadius: 24, backgroundColor: "#14241a", padding: 22 },
   gatewayTitle: {
     color: "#fff",
     fontSize: 36,
@@ -344,7 +353,7 @@ const styles = StyleSheet.create({
     letterSpacing: -1.5,
   },
   gatewayLabel: {
-    color: "#16a34a",
+    color: "#a5e9bb",
     fontSize: 12,
     fontWeight: "800",
     letterSpacing: 1.4,
@@ -352,13 +361,13 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
   gatewayDescription: {
-    color: "rgba(255,255,255,0.55)",
+    color: "#d0dfd4",
     fontSize: 15,
     lineHeight: 23,
     marginTop: 12,
   },
   gatewayHint: {
-    color: "#16a34a",
+    color: "#a5e9bb",
     fontSize: 12,
     fontWeight: "800",
     letterSpacing: 1.2,

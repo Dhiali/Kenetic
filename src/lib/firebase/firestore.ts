@@ -11,12 +11,15 @@ import {
     getDoc,
     getDocs,
     getFirestore,
+    query,
     runTransaction,
     serverTimestamp,
     setDoc,
     updateDoc,
+    where,
 } from "firebase/firestore";
 import { firebaseApp } from "./app";
+import { recentFocusActivity } from "../focus/activity";
 
 export const firestore: Firestore = getFirestore(firebaseApp);
 
@@ -427,6 +430,11 @@ export async function getFocusDashboardMetrics(uid: string) {
       (total, session) => total + (session.durationSeconds ?? 0) / 60,
       0,
     );
+  const secondsFor = (records: typeof completedFocusSessions) =>
+    records.reduce((total, session) => total + (
+      typeof session.durationSeconds === "number" && Number.isFinite(session.durationSeconds) && session.durationSeconds > 0
+        ? session.durationSeconds : 0
+    ), 0);
 
   return {
     completedSessions: completedFocusSessions.length,
@@ -436,6 +444,10 @@ export async function getFocusDashboardMetrics(uid: string) {
     getShitDoneMinutes: Math.round(minutesFor(getShitDoneSessions)),
     alienModeMinutes: Math.round(minutesFor(alienModeSessions)),
     totalFocusMinutes: Math.round(minutesFor(completedFocusSessions)),
+    totalFocusSeconds: secondsFor(completedFocusSessions),
+    getShitDoneSeconds: secondsFor(getShitDoneSessions),
+    alienModeSeconds: secondsFor(alienModeSessions),
+    recent: recentFocusActivity(sessions, new Date()),
   };
 }
 
@@ -582,6 +594,31 @@ export async function getChallengeProgress(uid: string, challengeId: string) {
   return snapshot.exists() ? snapshot.data() : null;
 }
 
+export async function listCompletedChallenges(uid: string) {
+  const snapshot = await getDocs(query(challengeProgressCollection(uid), where("status", "==", "completed")));
+  return snapshot.docs.map((entry) => ({ ...entry.data(), challengeId: entry.id }));
+}
+
+export async function getOrCreateChallengeAnchor(uid: string, now: number) {
+  const ref = doc(challengeProgressCollection(uid), "daily-rolling-anchor");
+  return runTransaction(firestore, async (transaction) => {
+    const snapshot = await transaction.get(ref);
+    if (snapshot.exists()) {
+      const anchor = snapshot.data().metadata?.anchorMillis;
+      if (typeof anchor !== "number" || !Number.isSafeInteger(anchor) || anchor < 0) {
+        throw new Error("Saved challenge schedule is invalid.");
+      }
+      return anchor;
+    }
+    transaction.set(ref, {
+      challengeId: "daily-rolling-anchor",
+      status: "available",
+      metadata: { anchorMillis: now },
+    });
+    return now;
+  });
+}
+
 export function deleteChallengeProgress(uid: string, challengeId: string) {
   return deleteDoc(doc(challengeProgressCollection(uid), challengeId));
 }
@@ -688,22 +725,13 @@ export async function getOutdoorDashboardMetrics(uid: string) {
 export type QuizQueueItem = {
   scanId: string;
   title: string;
-  scientificName?: string;
-  capturedAssetUri?: string;
+  summary: string;
 };
 
 export async function getQuizQueue(
   uid: string,
-  maxItems = 5,
 ): Promise<QuizQueueItem[]> {
-  const [scansSnapshot, quizzesSnapshot] = await Promise.all([
-    getDocs(scanHistoryCollection(uid)),
-    getDocs(quizHistoryCollection(uid)),
-  ]);
-
-  const answeredQuestionIds = new Set(
-    quizzesSnapshot.docs.map((entry) => entry.data().questionId),
-  );
+  const scansSnapshot = await getDocs(scanHistoryCollection(uid));
 
   // Freshly-written scans carry an unresolved serverTimestamp (null) until
   // the server acks it, so they must sort first to appear in the queue instantly.
@@ -721,17 +749,16 @@ export async function getQuizQueue(
   const queue: QuizQueueItem[] = [];
   for (const scan of scans) {
     const data = scan.data;
-    if (!data.includeInDailyQuizzes) continue;
-    if (seenTitles.has(data.title)) continue;
-    if (answeredQuestionIds.has(`scan-${scan.id}`)) continue;
-    seenTitles.add(data.title);
+    if (!(data.engine === "gemini-v1" && data.source === "camera") && !data.includeInDailyQuizzes) continue;
+    if (typeof data.title !== "string" || !data.title.trim() || typeof data.summary !== "string" || !data.summary.trim()) continue;
+    const name = data.title.trim().toLocaleLowerCase();
+    if (seenTitles.has(name)) continue;
+    seenTitles.add(name);
     queue.push({
       scanId: scan.id,
       title: data.title,
-      scientificName: data.scientificName,
-      capturedAssetUri: data.capturedAssetUri,
+      summary: data.summary,
     });
-    if (queue.length >= maxItems) break;
   }
   return queue;
 }

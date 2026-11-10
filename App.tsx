@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useState } from "react";
 
 import { StyleSheet, Text, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { SafeAreaProvider } from "react-native-safe-area-context";
 import SwipeAction from "./src/components/SwipeAction";
 import {
     persistOnboardingCompletion,
@@ -35,9 +36,9 @@ function ComingSoon({ label, onBack }: { label: string; onBack: () => void }) {
     <View style={styles.comingSoon}>
       <Text style={styles.comingSoonTitle}>{label}</Text>
       <Text style={styles.comingSoonSub}>
-        not ported yet — next build phase
+        Not ported yet — next build phase
       </Text>
-      <SwipeAction label="back to dashboard" onActivate={onBack} />
+      <SwipeAction label="Back to dashboard" onActivate={onBack} />
     </View>
   );
 }
@@ -84,7 +85,7 @@ export default function App() {
           return (
             <View style={styles.startupError}>
               <Text style={styles.startupMessage}>{startupError}</Text>
-              <SwipeAction label="retry connection" onActivate={() => setStartupAttempt((value) => value + 1)} />
+              <SwipeAction label="Retry connection" onActivate={() => setStartupAttempt((value) => value + 1)} />
             </View>
           );
         }
@@ -162,8 +163,8 @@ export default function App() {
       case "GSD_PENALTY":
         return (
           <FeatureDetail
-            title="get shit done."
-            label="focus setup"
+            title="Get shit done."
+            label="Focus setup"
             description="Configure your sound tether and app lock."
             onBack={() => goTo("FOCUS")}
           />
@@ -215,7 +216,7 @@ export default function App() {
         );
       case "BREATHE_EXERCISE":
       case "BREATHE_RITUAL":
-        return <ComingSoon label="breathe." onBack={() => goTo("DASHBOARD")} />;
+        return <ComingSoon label="Breathe." onBack={() => goTo("DASHBOARD")} />;
       case "OUTDOORS_DASHBOARD":
         return (
           <OutdoorsDashboard
@@ -257,7 +258,7 @@ export default function App() {
       case "OUTDOORS_FEATURE":
         return (
           <ComingSoon
-            label="outdoors feature."
+            label="Outdoors feature."
             onBack={() => goTo("OUTDOORS_DASHBOARD")}
           />
         );
@@ -268,10 +269,12 @@ export default function App() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <View style={styles.outer}>
-        <View style={styles.device}>{renderScreen()}</View>
-        <StatusBar style="light" />
-      </View>
+      <SafeAreaProvider>
+        <View style={styles.outer}>
+          <View style={styles.device}>{renderScreen()}</View>
+          <StatusBar style="light" />
+        </View>
+      </SafeAreaProvider>
     </GestureHandlerRootView>
   );
 }
@@ -289,7 +292,7 @@ function FeatureDetail({
 }) {
   return (
     <View style={styles.featureDetail}>
-      <SwipeAction label="focus state" onActivate={onBack} />
+      <SwipeAction label="Focus state" onActivate={onBack} />
       <Text style={styles.featureDetailTitle}>{title}</Text>
       <Text style={styles.featureDetailLabel}>{label}</Text>
       <Text style={styles.featureDetailDescription}>{description}</Text>

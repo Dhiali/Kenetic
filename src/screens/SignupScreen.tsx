@@ -223,9 +223,9 @@ export default function SignupScreen({
           </View>
 
           <View style={styles.bottom}>
-            <Text style={styles.hint}>drag to agree to terms & Conditions</Text>
+            <Text style={styles.hint}>Drag to agree to terms & conditions</Text>
             <Text style={styles.termsStatus}>
-              {values.termsAccepted ? "terms accepted" : "terms not accepted"}
+              {values.termsAccepted ? "Terms accepted" : "Terms not accepted"}
             </Text>
             <View style={styles.track}>
               <View style={styles.trackDashed} />

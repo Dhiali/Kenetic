@@ -30,6 +30,7 @@ import {
     getBreatheDashboardMetrics,
     getAnsweredQuizQuestionIds,
     getChallengeProgress,
+    getOrCreateChallengeAnchor,
     getFocusDashboardMetrics,
     getOutdoorDashboardMetrics,
     getQuizQueue,
@@ -37,6 +38,7 @@ import {
     hasInitialIntention,
     markOnboardingComplete,
     listSavedPlaces,
+    listCompletedChallenges,
     renameSavedPlace,
     saveChallengeProgress,
     saveInitialIntention,
@@ -416,6 +418,31 @@ export async function loadTodayChallenge(day: string) {
   const user = await ensureAnonymousUser();
   const record = await getChallengeProgress(user.uid, `daily-${day}`);
   return record?.status ?? "available";
+}
+
+export async function loadChallengeAnchor(now: number) {
+  const user = await ensureAnonymousUser();
+  return getOrCreateChallengeAnchor(user.uid, now);
+}
+
+export async function loadChallengeStatus(challengeId: string) {
+  const user = await ensureAnonymousUser();
+  const record = await getChallengeProgress(user.uid, challengeId);
+  return record?.status ?? "available";
+}
+
+export async function loadCompletedChallenges() {
+  const user = await ensureAnonymousUser();
+  return listCompletedChallenges(user.uid);
+}
+
+export async function updateChallengeStatus(challengeId: string, status: "started" | "completed", challenge: string) {
+  await persistOutdoorChallenge(challengeId, status, { challenge });
+}
+
+export async function clearChallengeStatus(challengeId: string) {
+  const user = await ensureAnonymousUser();
+  await deleteChallengeProgress(user.uid, challengeId);
 }
 
 export async function updateTodayChallenge(

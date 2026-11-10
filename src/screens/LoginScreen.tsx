@@ -160,11 +160,11 @@ export default function LoginScreen({
                 onAccessibilityTap={onBack}
                 style={backStyle}
               >
-                <Text style={styles.backLink}>where to? →</Text>
+                <Text style={styles.backLink}>Where to? →</Text>
               </Animated.View>
             </GestureDetector>
           )}
-          <Text style={styles.title}>return.</Text>
+          <Text style={styles.title}>Return.</Text>
           <Text style={styles.intro}>
             Come back to your practices, your attention, and the way you want to
             meet the day.
@@ -182,7 +182,7 @@ export default function LoginScreen({
                 }));
               }}
               onBlur={validate}
-              placeholder="email"
+              placeholder="Email"
               placeholderTextColor={colors.gray400}
               keyboardType="email-address"
               returnKeyType="done"
@@ -202,7 +202,7 @@ export default function LoginScreen({
                 }));
               }}
               onBlur={validate}
-              placeholder="password"
+              placeholder="Password"
               placeholderTextColor={colors.gray400}
               secureTextEntry
               style={styles.input}
@@ -213,7 +213,7 @@ export default function LoginScreen({
           </View>
           {!!errors.form && <Text style={styles.error}>{errors.form}</Text>}
           <View style={styles.bottom}>
-            <Text style={styles.welcome}>welcome back</Text>
+            <Text style={styles.welcome}>Welcome back</Text>
             <View style={styles.actionRow}>
               <View style={styles.dots}>
                 <PulseDot color={colors.green} delay={0} />
@@ -248,7 +248,7 @@ export default function LoginScreen({
               </View>
             </View>
             <Text style={styles.submitHint}>
-              swipe right to jump to dashboard
+              Swipe right to jump to dashboard
             </Text>
           </View>
         </ScrollView>

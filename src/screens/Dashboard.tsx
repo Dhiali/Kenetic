@@ -297,6 +297,8 @@ export default function DashboardScreen({
             <Animated.Text
               entering={FadeIn.duration(400)}
               style={styles.selectedStateText}
+              numberOfLines={1}
+              adjustsFontSizeToFit
             >
               {selectedItem.label}
             </Animated.Text>
@@ -396,6 +398,8 @@ const styles = StyleSheet.create({
     textShadowColor: "rgba(255, 255, 255, 0.45)",
     textShadowOffset: { width: 0, height: 0 },
     textShadowRadius: 12,
+    width: "100%",
+    textAlign: "center",
   },
   profileText: {
     fontSize: 16,
@@ -413,6 +417,7 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFill,
     justifyContent: "center",
     alignItems: "center",
+    paddingHorizontal: 32,
     zIndex: 60,
   },
 });

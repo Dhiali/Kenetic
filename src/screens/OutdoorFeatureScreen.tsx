@@ -1,4 +1,3 @@
-import { BlurView } from "expo-blur";
 import {
     CameraView,
     useCameraPermissions,
@@ -9,12 +8,14 @@ import { LinearGradient } from "expo-linear-gradient";
 import React, { useEffect, useRef, useState } from "react";
 import {
     Image,
+    Linking,
     Pressable,
     ScrollView,
     StyleSheet,
     Text,
     View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
     cancelAnimation,
@@ -31,20 +32,19 @@ import Animated, {
 } from "react-native-reanimated";
 import {
     finishBioRadarSession,
-    loadOutdoorQuizQueue,
     persistOutdoorFeatureLaunch,
-    persistOutdoorQuizResult,
     persistOutdoorScan,
     startBioRadarSession,
 } from "../lib/firebase/bootstrap";
 import { firebaseErrorMessage } from "../lib/firebase/errors";
+import { capitalizeSentenceStarts } from "../utils/sentenceCase";
 import SwipeAction from "../components/SwipeAction";
 import AiConsent from "../components/AiConsent";
 import { useAiConsent } from "../lib/ai/useAiConsent";
 import { analyzeNature, type NatureResult } from "../lib/ai/client";
-import { getCuratedQuizItems } from "../lib/outdoors/curatedQuiz";
 import DailyChallengesScreen from "./DailyChallengesScreen";
 import SpotFinderScreen from "./SpotFinderScreen";
+import CuriosityQuizScreen from "./CuriosityQuizScreen";
 
 export type OutdoorFeature =
   | "bio-radar"
@@ -56,61 +56,15 @@ type Props = { feature: OutdoorFeature; onBack: () => void };
 type BioPhase = "live" | "processing" | "dossier";
 type ActiveBioSession = { id: string; startedAtMs: number; mode: "visual" };
 
-const QUESTION_BANK: Record<
-  string,
-  { prompt: string; options: string[]; correctIndex: number; fact: string }
-> = {
-  "EUROPEAN ROBIN": {
-    prompt: "How does the European Robin navigate?",
-    options: [
-      "tracking the sun's position",
-      "using a magnetic compass in its eye",
-      "following seasonal wind patterns",
-    ],
-    correctIndex: 1,
-    fact: "It navigates using a magnetic compass sensitive to blue light.",
-  },
-  "COMMON OAK": {
-    prompt: "What lets an old oak support so much biodiversity?",
-    options: [
-      "its fast yearly growth rate",
-      "decades of accumulated bark texture and hollows",
-      "chemicals released from its acorns",
-    ],
-    correctIndex: 1,
-    fact: "An old oak can host more biodiversity than a young mixed woodland patch.",
-  },
-  "RED FOX": {
-    prompt: "What aid does the red fox use while hunting?",
-    options: [
-      "echolocation clicks",
-      "infrared vision",
-      "the Earth's magnetic field",
-    ],
-    correctIndex: 2,
-    fact: "It uses the Earth's magnetic field as an aiming aid while hunting.",
-  },
-};
-
-const FALLBACK_QUESTION = {
-  prompt: "What role does this discovery play in its ecosystem?",
-  options: [
-    "it has no measurable ecological role",
-    "it supports surrounding species and habitat balance",
-    "it only appears in captivity",
-  ],
-  correctIndex: 1,
-  fact: "Every logged discovery contributes to the balance of its habitat.",
-};
-
 export default function OutdoorFeatureScreen({ feature, onBack }: Props) {
   if (feature === "bio-radar") return <BioRadarExperience onBack={onBack} />;
-  if (feature === "quizzes") return <QuizzesExperience onBack={onBack} />;
+  if (feature === "quizzes") return <CuriosityQuizScreen onBack={onBack} />;
   if (feature === "daily-challenges") return <DailyChallengesScreen onBack={onBack} />;
   return <SpotFinderScreen onBack={onBack} />;
 }
 
 function BioRadarExperience({ onBack }: { onBack: () => void }) {
+  const insets = useSafeAreaInsets();
   const cameraPermissionHook = useCameraPermissions();
   const cameraPermission = Array.isArray(cameraPermissionHook)
     ? cameraPermissionHook[0]
@@ -134,6 +88,7 @@ function BioRadarExperience({ onBack }: { onBack: () => void }) {
   const [frozenUri, setFrozenUri] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [telemetryIndex, setTelemetryIndex] = useState(0);
   const [activeSession, setActiveSession] = useState<ActiveBioSession | null>(
     null,
@@ -144,9 +99,6 @@ function BioRadarExperience({ onBack }: { onBack: () => void }) {
   const auraPulse = useSharedValue(0);
   const sweep = useSharedValue(0);
   const exitX = useSharedValue(0);
-
-  const discoveredX = useSharedValue(0);
-  const discoveredY = useSharedValue(0);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -276,6 +228,7 @@ function BioRadarExperience({ onBack }: { onBack: () => void }) {
     }
     clearHold();
     setError("");
+    setNotice("");
     processingRef.current = true;
 
     const sessionId = await startBioRadarSession("visual").catch((caught) => {
@@ -373,7 +326,7 @@ function BioRadarExperience({ onBack }: { onBack: () => void }) {
         title: discovery.name,
         scientificName: discovery.scientificName,
         summary: `${discovery.summary} ${discovery.uncertainty}`,
-        includeInDailyQuizzes: false,
+        includeInDailyQuizzes: true,
         mode: "visual",
         engine: "gemini-v1",
         ...(sessionId ? { scanSessionId: sessionId } : {}),
@@ -384,7 +337,7 @@ function BioRadarExperience({ onBack }: { onBack: () => void }) {
         await finishBioRadarSession(sessionId, durationSeconds, true, {
           scanMode: "visual",
           species: discovery.name,
-          includeInDailyQuizzes: false,
+          includeInDailyQuizzes: true,
         });
       }
 
@@ -397,9 +350,8 @@ function BioRadarExperience({ onBack }: { onBack: () => void }) {
       setDiscovery(null);
       void aiConsent.refresh();
       setPhase("live");
+      setNotice("Discovery saved. You can scan something else whenever you're ready.");
       setFrozenUri(null);
-      discoveredX.value = 0;
-      discoveredY.value = 0;
       holdProgress.value = 0;
     } catch (caught) {
       if (scanSaved) {
@@ -413,8 +365,6 @@ function BioRadarExperience({ onBack }: { onBack: () => void }) {
         void aiConsent.refresh();
         setPhase("live");
         setFrozenUri(null);
-        discoveredX.value = 0;
-        discoveredY.value = 0;
         holdProgress.value = 0;
         setError(
           "Discovery saved, but its session analytics could not be finalized.",
@@ -428,28 +378,6 @@ function BioRadarExperience({ onBack }: { onBack: () => void }) {
       setSaving(false);
     }
   };
-
-  const discoveredGesture = Gesture.Pan()
-    .enabled(!saving)
-    .onBegin(() => {
-      runOnJS(triggerLight)();
-    })
-    .onUpdate((event) => {
-      if (saving) return;
-      discoveredX.value = event.translationX;
-      discoveredY.value = event.translationY;
-    })
-    .onEnd(() => {
-      if (saving) return;
-      if (discoveredX.value > 65 && Math.abs(discoveredY.value) < 60) {
-        discoveredX.value = withSpring(0, { damping: 14, stiffness: 240 });
-        discoveredY.value = withSpring(0, { damping: 14, stiffness: 240 });
-        runOnJS(commitDiscovery)();
-        return;
-      }
-      discoveredX.value = withSpring(0);
-      discoveredY.value = withSpring(0);
-    });
 
   const exitGesture = Gesture.Pan()
     .activeOffsetX(10)
@@ -482,21 +410,25 @@ function BioRadarExperience({ onBack }: { onBack: () => void }) {
     transform: [{ translateY: interpolate(sweep.value, [0, 1], [-260, 260]) }],
   }));
 
-  const discoveredStyle = useAnimatedStyle(() => ({
-    transform: [
-      { translateX: discoveredX.value },
-      { translateY: discoveredY.value },
-    ],
-    opacity: saving ? 0.55 : 1,
-  }));
-
   const telemetryLines = [
-    "preparing your photo...",
-    "asking Gemini...",
-    "results may be uncertain",
+    "Preparing your photo...",
+    "Asking Gemini...",
+    "Results may be uncertain",
   ];
 
   const showCamera = phase === "live" && aiConsent.status === "agreed";
+  const requestCameraAccess = async () => {
+    setError("");
+    try {
+      if (cameraPermission && !cameraPermission.canAskAgain && !cameraPermission.granted) {
+        await Linking.openSettings();
+      } else {
+        await requestCameraPermission();
+      }
+    } catch (caught) {
+      setError(`Could not open camera permission settings: ${firebaseErrorMessage(caught)}`);
+    }
+  };
 
   return (
     <Animated.View
@@ -518,77 +450,103 @@ function BioRadarExperience({ onBack }: { onBack: () => void }) {
         <View style={styles.bioFallback} />
       )}
 
-      <View style={styles.bioOverlay} />
-      <View style={styles.gridOverlay} />
+      <View pointerEvents="none" style={styles.bioOverlay} />
 
-      <GestureDetector gesture={exitGesture}>
-        <View style={styles.bioNavRow}>
-          <Text style={styles.bioBack}>&lt;- outdoors state</Text>
-          <Text style={styles.bioHint}>(drag right to return)</Text>
-        </View>
-      </GestureDetector>
+      {phase !== "dossier" && (
+        <GestureDetector gesture={exitGesture}>
+          <View
+            accessible
+            accessibilityRole="adjustable"
+            accessibilityLabel="Return to outdoors"
+            accessibilityHint="Drag right, or activate to return."
+            accessibilityActions={[{ name: "activate", label: "Return to outdoors" }]}
+            onAccessibilityAction={(event) => {
+              if (event.nativeEvent.actionName === "activate") void handleBackFromBioRadar();
+            }}
+            onAccessibilityTap={() => void handleBackFromBioRadar()}
+            style={[styles.bioNavRow, { top: insets.top + 52 }]}
+          >
+            <Text style={styles.bioBack}>Outdoors →</Text>
+            <Text style={styles.bioHint}>(Drag right to return)</Text>
+          </View>
+        </GestureDetector>
+      )}
 
       {phase === "live" && aiConsent.status !== "agreed" && (
-        <ScrollView style={styles.consentScroll} contentContainerStyle={styles.consentContent}>
-          {aiConsent.status === "loading" && <Text style={styles.telemetry}>Checking AI agreement...</Text>}
+        <ScrollView style={[styles.bioScroll, { top: insets.top + 110 }]} contentContainerStyle={[styles.bioContent, { paddingBottom: insets.bottom + 32 }]}>
+          <Text style={styles.bioEyebrow}>OUTDOORS / BIO RADAR</Text>
+          <Text style={styles.bioTitle}>Look closer.</Text>
+          <Text style={styles.bioIntro}>Explore what you find in nature, one photo at a time.</Text>
+          <View style={styles.bioInfoCard}>
+          <Text style={styles.bioCardLabel}>BEFORE YOU SCAN</Text>
+          {aiConsent.status === "loading" && <Text style={styles.bioBody}>Checking your AI agreement...</Text>}
           {aiConsent.status === "not-agreed" && (
             <AiConsent disabled={aiConsent.saving} onAgree={() => void aiConsent.change(true)} />
           )}
-          {!!aiConsent.error && <Text style={styles.error}>{aiConsent.error}</Text>}
-          {aiConsent.status === "error" && <SwipeAction label="retry checking AI agreement" onActivate={() => void aiConsent.refresh()} />}
-          {!!error && <Text style={styles.error}>{error}</Text>}
+          {!!aiConsent.error && <Text accessibilityLiveRegion="polite" style={styles.error}>{aiConsent.error}</Text>}
+          {aiConsent.status === "error" && <SwipeAction label="Retry checking AI agreement" onActivate={() => void aiConsent.refresh()} />}
+          {!!error && <Text accessibilityLiveRegion="polite" style={styles.error}>{error}</Text>}
+          </View>
         </ScrollView>
       )}
       {phase === "live" && aiConsent.status === "agreed" && (
-        <View style={styles.reticleLayer}>
-          <Text style={styles.telemetry}>A scan sends a photo to Gemini. Results are estimates, not safety advice. Avoid photographing people or private information.</Text>
-          {!!error && <Text style={styles.error}>{error}</Text>}
-          {showCamera && !cameraPermission?.granted && (
-            <SwipeAction label="grant camera permission" onActivate={() => void requestCameraPermission()} />
+        <ScrollView style={[styles.bioScroll, { top: insets.top + 110 }]} contentContainerStyle={[styles.bioContent, { paddingBottom: insets.bottom + 32 }]}>
+          <Text style={styles.bioEyebrow}>OUTDOORS / BIO RADAR</Text>
+          <Text style={styles.bioTitle}>Look closer.</Text>
+          <Text style={styles.bioIntro}>Find something in nature and bring it into view.</Text>
+          <View style={styles.scanArea}>
+          {cameraPermission?.granted ? (
+            <Pressable
+              onPressIn={onReticlePressIn}
+              onPressOut={onReticlePressOut}
+              accessibilityRole="button"
+              accessibilityLabel="Start nature discovery"
+              accessibilityHint="Hold for two seconds to capture and send a photo to Gemini, or use the activate accessibility action."
+              accessibilityActions={[{ name: "activate", label: "Start discovery" }]}
+              onAccessibilityAction={(event) => {
+                if (event.nativeEvent.actionName === "activate") void beginProcessing();
+              }}
+            >
+              <Animated.View style={[styles.reticleAura, auraStyle]}>
+                <LinearGradient
+                  colors={["rgba(22,163,74,0.75)", "rgba(34,197,94,0.15)", "rgba(34,197,94,0)"]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={StyleSheet.absoluteFill}
+                />
+              </Animated.View>
+              <Animated.View style={[styles.reticleRing, reticleStyle]}>
+                <Text style={styles.reticleText}>HOLD 2 SEC</Text>
+                <Text style={styles.reticleSubtext}>to scan</Text>
+              </Animated.View>
+            </Pressable>
+          ) : cameraPermission ? (
+            <View style={styles.permissionCard}>
+              <Text style={styles.bioCardLabel}>CAMERA ACCESS</Text>
+              <Text style={styles.bioBody}>Allow camera access to photograph a discovery.</Text>
+              <SwipeAction label={cameraPermission.canAskAgain ? "Allow camera access" : "Open camera settings"} onActivate={() => void requestCameraAccess()} />
+            </View>
+          ) : (
+            <Text style={styles.bioBody}>Checking camera permission...</Text>
           )}
-
-          <Pressable
-            onPressIn={onReticlePressIn}
-            onPressOut={onReticlePressOut}
-            accessibilityLabel="Start nature discovery"
-            accessibilityHint="Hold for two seconds to start, or use the activate accessibility action."
-            accessibilityActions={[{ name: "activate", label: "Start discovery" }]}
-            onAccessibilityAction={(event) => {
-              if (event.nativeEvent.actionName === "activate") void beginProcessing();
-            }}
-          >
-            <Animated.View style={[styles.reticleAura, auraStyle]}>
-              <LinearGradient
-                colors={[
-                  "rgba(22,163,74,0.75)",
-                  "rgba(34,197,94,0.15)",
-                  "rgba(34,197,94,0)",
-                ]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={StyleSheet.absoluteFill}
-              />
-            </Animated.View>
-            <Animated.View style={[styles.reticleRing, reticleStyle]}>
-              <Text style={styles.reticleText}>hold 2s to scan</Text>
-            </Animated.View>
-          </Pressable>
-        </View>
+          </View>
+          <View style={styles.bioInfoCard}>
+            <Text style={styles.bioCardLabel}>BEFORE YOU SCAN</Text>
+            <Text style={styles.bioBody}>Your photo is sent to Gemini. Avoid people and private information. Results are estimates, not safety advice.</Text>
+          </View>
+          {!!notice && <Text accessibilityLiveRegion="polite" style={styles.bioNotice}>{notice}</Text>}
+          {!!error && <Text accessibilityLiveRegion="polite" style={styles.error}>{error}</Text>}
+        </ScrollView>
       )}
 
       {phase === "processing" && (
         <View style={styles.processingLayer}>
           <Animated.View style={[styles.sonarSweep, sweepStyle]} />
-          <View style={styles.telemetryBox}>
-            <Text style={styles.telemetry}>
-              {telemetryLines[telemetryIndex]}
-            </Text>
-            <Text style={styles.telemetry}>
-              {telemetryLines[(telemetryIndex + 1) % 3]}
-            </Text>
-            <Text style={styles.telemetry}>
-              {telemetryLines[(telemetryIndex + 2) % 3]}
-            </Text>
+          <View style={styles.processingCard}>
+            <Text style={styles.bioCardLabel}>BIO RADAR / ANALYZING</Text>
+            <Text style={styles.processingTitle}>Taking a closer look.</Text>
+            <Text accessibilityLiveRegion="polite" style={styles.bioBody}>{telemetryLines[telemetryIndex]}</Text>
+            <Text style={styles.processingNote}>Please keep Kenetic open while your photo is analyzed.</Text>
           </View>
           {!!error && <Text style={styles.error}>{error}</Text>}
         </View>
@@ -596,37 +554,23 @@ function BioRadarExperience({ onBack }: { onBack: () => void }) {
 
       {phase === "dossier" && discovery && (
         <View style={styles.dossierSheet}>
-          <View style={styles.dossierBlob} />
-          <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
-          <SwipeAction label="back to outdoors" disabled={saving} onActivate={() => void handleBackFromBioRadar()} />
-          <Text style={styles.dossierTitle}>{discovery.name}</Text>
+          <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 32 }} showsVerticalScrollIndicator={false}>
+          <Text style={styles.bioEyebrow}>BIO RADAR / POSSIBLE DISCOVERY</Text>
+          <Text style={styles.dossierTitle}>{capitalizeSentenceStarts(discovery.name)}</Text>
           <Text style={styles.dossierSubtitle}>{discovery.scientificName}</Text>
-
-          <Text style={styles.dossierRow}>{discovery.summary}</Text>
-          <Text style={styles.dossierRow}>{discovery.uncertainty}</Text>
-          <Text style={styles.matchText}>AI ESTIMATE ONLY. DO NOT USE FOR EATING, HANDLING OR SAFETY DECISIONS.</Text>
-          <Text style={styles.dossierRow}>AI discoveries are not added to quizzes.</Text>
-
-          <View style={styles.discoveredRow}>
-            <Text style={styles.discoveredLabel}>drag and drop to save</Text>
-            <View style={styles.discoveredWordWrap}>
-              <GestureDetector gesture={discoveredGesture}>
-                <Animated.Text
-                  style={[
-                    styles.discoveredWordActive,
-                    discoveredStyle,
-                    saving ? styles.discoveredWordSaving : null,
-                  ]}
-                >
-                  {saving ? "saving..." : "discovered"}
-                </Animated.Text>
-              </GestureDetector>
-              <Text style={styles.discoveredTarget}>discovered</Text>
-            </View>
+          <View style={styles.dossierCard}>
+            <Text style={styles.bioCardLabel}>ABOUT THIS DISCOVERY</Text>
+            <Text style={styles.dossierRow}>{capitalizeSentenceStarts(discovery.summary)}</Text>
           </View>
-          <SwipeAction label={saving ? "saving discovery" : "save discovery"} disabled={saving} onActivate={() => void commitDiscovery()} />
+          <View style={styles.dossierCard}>
+            <Text style={styles.bioCardLabel}>WHAT TO KEEP IN MIND</Text>
+            <Text style={styles.dossierRow}>{capitalizeSentenceStarts(discovery.uncertainty)}</Text>
+          </View>
+          <Text style={styles.matchText}>AI estimate only. Do not use for eating, handling or safety decisions.</Text>
+          <Text style={styles.dossierNote}>Saving keeps the AI result, not the photo. Quizzes may ask what this result said; it is not a verified identification.</Text>
+          <SwipeAction label={saving ? "Saving discovery" : "Save discovery"} disabled={saving} onActivate={() => void commitDiscovery()} />
 
-          {!!error && <Text style={styles.error}>{error}</Text>}
+          {!!error && <Text accessibilityLiveRegion="polite" style={styles.error}>{error}</Text>}
           </ScrollView>
         </View>
       )}
@@ -635,537 +579,18 @@ function BioRadarExperience({ onBack }: { onBack: () => void }) {
   );
 }
 
-type QuizItem = {
-  scanId: string;
-  title: string;
-  scientificName?: string;
-  capturedAssetUri?: string;
-  prompt: string;
-  options: string[];
-  correctIndex: number;
-  fact: string;
-};
-
-function QuizzesExperience({ onBack }: { onBack: () => void }) {
-  const [loading, setLoading] = useState(true);
-  const [queue, setQueue] = useState<QuizItem[]>([]);
-  const [queueIndex, setQueueIndex] = useState(0);
-  const [stage, setStage] = useState<
-    "lobby" | "question" | "synthesis" | "retained"
-  >("lobby");
-  const [selectedOption, setSelectedOption] = useState<number | null>(null);
-  const [correct, setCorrect] = useState<boolean | null>(null);
-  const [showFact, setShowFact] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-  const [loadFailed, setLoadFailed] = useState(false);
-  const savingQuizRef = useRef(false);
-  const [reloadToken, setReloadToken] = useState(0);
-
-  const exitX = useSharedValue(0);
-  const transitionX = useSharedValue(0);
-  const recallY = useSharedValue(0);
-  const waveOpacity = useSharedValue(0);
-  const retainedX = useSharedValue(0);
-  const option0Y = useSharedValue(0);
-  const option1Y = useSharedValue(0);
-  const option2Y = useSharedValue(0);
-  const optionYs = [option0Y, option1Y, option2Y];
-  const poolPulse = useSharedValue(0);
-  const truthPulse = useSharedValue(0);
-
-  useEffect(() => {
-    poolPulse.value = withRepeat(
-      withSequence(
-        withTiming(1, { duration: 2400, easing: Easing.inOut(Easing.ease) }),
-        withTiming(0, { duration: 2400, easing: Easing.inOut(Easing.ease) }),
-      ),
-      -1,
-      true,
-    );
-    truthPulse.value = withRepeat(
-      withSequence(
-        withTiming(1, { duration: 1500, easing: Easing.inOut(Easing.ease) }),
-        withTiming(0, { duration: 1500, easing: Easing.inOut(Easing.ease) }),
-      ),
-      -1,
-      true,
-    );
-  }, []);
-
-  useEffect(() => {
-    void persistOutdoorFeatureLaunch("quizzes").catch(() => undefined);
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setLoadFailed(false);
-    loadOutdoorQuizQueue()
-      .then(({ discoveries, answeredIds }) => {
-        if (cancelled) return;
-        const items: QuizItem[] = discoveries.map((record) => {
-          const question = QUESTION_BANK[record.title] ?? FALLBACK_QUESTION;
-          return { ...record, ...question };
-        });
-        setQueue([...items, ...getCuratedQuizItems(new Date(), answeredIds)]);
-        setQueueIndex(0);
-        setStage("lobby");
-        setError("");
-      })
-      .catch((caught) => {
-        if (cancelled) return;
-        setLoadFailed(true);
-        setError(firebaseErrorMessage(caught));
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [reloadToken]);
-
-  const triggerLight = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(
-      () => undefined,
-    );
-  };
-  const triggerHeavy = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(
-      () => undefined,
-    );
-  };
-  const triggerSuccess = () => {
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
-      () => undefined,
-    );
-  };
-  const triggerWarning = () => {
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(
-      () => undefined,
-    );
-    setTimeout(triggerLight, 140);
-  };
-  const triggerError = () => {
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(
-      () => undefined,
-    );
-  };
-
-  const quizTruthCircleStyle = useAnimatedStyle(() => ({
-    transform: [
-      { scale: interpolate(truthPulse.value, [0, 1], [0.94, 1.08]) },
-      { scaleX: interpolate(truthPulse.value, [0, 1], [1, 1.07]) },
-      { scaleY: interpolate(truthPulse.value, [0, 1], [1.07, 0.95]) },
-    ],
-  }));
-
-  const retryLoad = () => {
-    triggerLight();
-    setReloadToken((value) => value + 1);
-  };
-
-  const currentItem = queue[queueIndex];
-
-  const beginRecall = () => {
-    if (!currentItem) return;
-    triggerHeavy();
-    setStage("question");
-    setSelectedOption(null);
-    setCorrect(null);
-    setShowFact(false);
-  };
-
-  const recallGesture = Gesture.Pan()
-    .enabled(stage === "lobby" && !!currentItem)
-    .onUpdate((event) => {
-      if (event.translationY > 0) recallY.value = event.translationY;
-    })
-    .onEnd(() => {
-      if (recallY.value > 70) {
-        recallY.value = withTiming(160, { duration: 220 });
-        runOnJS(beginRecall)();
-        return;
-      }
-      recallY.value = withSpring(0);
-    });
-
-  const chooseOption = (optionIndex: number) => {
-    if (!currentItem || stage !== "question") return;
-    const isCorrect = optionIndex === currentItem.correctIndex;
-    setSelectedOption(optionIndex);
-    setCorrect(isCorrect);
-    setStage("synthesis");
-    waveOpacity.value = withSequence(
-      withTiming(1, { duration: 180 }),
-      withTiming(0, { duration: 700 }),
-    );
-    if (isCorrect) triggerSuccess();
-    else triggerWarning();
-    setTimeout(() => setShowFact(true), 420);
-  };
-
-  const makeOptionGesture = (optionIndex: number) =>
-    Gesture.Pan()
-      .enabled(stage === "question")
-      .onBegin(() => runOnJS(triggerLight)())
-      .onUpdate((event) => {
-        optionYs[optionIndex].value = event.translationY;
-      })
-      .onEnd(() => {
-        if (optionYs[optionIndex].value < -70) {
-          optionYs[optionIndex].value = withTiming(-140, { duration: 180 });
-          runOnJS(chooseOption)(optionIndex);
-          return;
-        }
-        optionYs[optionIndex].value = withSpring(0);
-      });
-
-  const option0Gesture = makeOptionGesture(0);
-  const option1Gesture = makeOptionGesture(1);
-  const option2Gesture = makeOptionGesture(2);
-  const optionGestures = [option0Gesture, option1Gesture, option2Gesture];
-
-  const advanceQueue = () => {
-    const applyAdvance = () => {
-      setQueueIndex((current) => current + 1);
-      setStage("lobby");
-      setSelectedOption(null);
-      setCorrect(null);
-      setShowFact(false);
-      recallY.value = 0;
-      option0Y.value = 0;
-      option1Y.value = 0;
-      option2Y.value = 0;
-      retainedX.value = 0;
-      savingQuizRef.current = false;
-      setSaving(false);
-    };
-    transitionX.value = withTiming(-420, { duration: 260 }, (finished) => {
-      if (!finished) return;
-      runOnJS(applyAdvance)();
-      transitionX.value = 420;
-      transitionX.value = withTiming(0, { duration: 260 });
-    });
-  };
-
-  const commitRetention = async () => {
-    if (savingQuizRef.current || !currentItem || correct === null) return;
-    savingQuizRef.current = true;
-    setSaving(true);
-    setError("");
-    try {
-      await persistOutdoorQuizResult({
-        questionId: `scan-${currentItem.scanId}`,
-        prompt: currentItem.prompt,
-        correct,
-      });
-      triggerHeavy();
-      advanceQueue();
-    } catch (caught) {
-      triggerError();
-      setError(firebaseErrorMessage(caught));
-      savingQuizRef.current = false;
-      setSaving(false);
-    }
-  };
-
-  const retainedGesture = Gesture.Pan()
-    .enabled(showFact && !saving)
-    .onUpdate((event) => {
-      if (event.translationX > 0) retainedX.value = event.translationX;
-    })
-    .onEnd(() => {
-      if (retainedX.value > 70) {
-        retainedX.value = withTiming(140, { duration: 180 });
-        runOnJS(commitRetention)();
-        return;
-      }
-      retainedX.value = withSpring(0);
-    });
-
-  const exitGesture = Gesture.Pan()
-    .activeOffsetX(10)
-    .onUpdate((event) => {
-      if (event.translationX > 0) exitX.value = event.translationX;
-    })
-    .onEnd((event) => {
-      if (event.translationX > 90) runOnJS(onBack)();
-      else exitX.value = withSpring(0);
-    });
-
-  const rootStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: exitX.value + transitionX.value }],
-  }));
-  const recallStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: recallY.value }],
-  }));
-  const waveStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(waveOpacity.value, [0, 1], [0, 0.2]),
-  }));
-  const retainedStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: retainedX.value }],
-  }));
-  const option0Style = useAnimatedStyle(() => ({
-    transform: [{ translateY: option0Y.value }],
-  }));
-  const option1Style = useAnimatedStyle(() => ({
-    transform: [{ translateY: option1Y.value }],
-  }));
-  const option2Style = useAnimatedStyle(() => ({
-    transform: [{ translateY: option2Y.value }],
-  }));
-  const optionStyles = [option0Style, option1Style, option2Style];
-  const poolStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(poolPulse.value, [0, 1], [0.82, 1]),
-  }));
-  const truthGlowStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(truthPulse.value, [0, 1], [0.45, 0.9]),
-    transform: [
-      { scale: interpolate(truthPulse.value, [0, 1], [0.92, 1.18]) },
-      { scaleX: interpolate(truthPulse.value, [0, 1], [1, 1.08]) },
-      { scaleY: interpolate(truthPulse.value, [0, 1], [1.06, 0.96]) },
-    ],
-  }));
-
-  const remaining = Math.max(0, queue.length - queueIndex);
-  const navOnLight = !!currentItem && stage !== "lobby";
-
-  return (
-    <Animated.View
-      style={[styles.quizRoot, rootStyle]}
-      entering={FadeIn.duration(360)}
-    >
-      <GestureDetector gesture={exitGesture}>
-        <View
-            accessible
-            accessibilityRole="adjustable"
-            accessibilityLabel="Return to outdoors"
-            accessibilityActions={[{ name: "activate", label: "Return to outdoors" }]}
-            onAccessibilityAction={(event) => {
-              if (event.nativeEvent.actionName === "activate") onBack();
-            }}
-            onAccessibilityTap={onBack}
-            style={styles.quizNavRow}
-          >
-          <Text style={navOnLight ? styles.quizNavBackDark : styles.bioBack}>
-            &lt;- outdoors
-          </Text>
-          <Text style={navOnLight ? styles.quizNavHintDark : styles.bioHint}>
-            (drag right to return)
-          </Text>
-        </View>
-      </GestureDetector>
-
-      {loading && (
-        <View style={styles.quizLoadingLayer}>
-          <Text style={styles.quizLoadingText}>loading queue...</Text>
-        </View>
-      )}
-      {!loading && loadFailed && (
-        <View style={styles.quizEmptyLayer}>
-          <Text style={styles.quizTitle}>curiosity quizzes.</Text>
-          <SwipeAction label="Quiz unavailable. Retry" onActivate={retryLoad} />
-        </View>
-      )}
-
-      {!loading && !loadFailed && !currentItem && (
-        <View style={styles.quizEmptyLayer}>
-          <Text style={styles.quizTitle}>curiosity quizzes.</Text>
-          <Text style={styles.quizSubtitle}>
-            today's questions are complete.
-          </Text>
-          <Text style={styles.quizEmptyHint}>
-            reopen quizzes after midnight UTC for today's questions.
-          </Text>
-        </View>
-      )}
-
-      {!loading && currentItem && stage === "lobby" && (
-        <View style={styles.quizLobbyLayer}>
-          <Text style={styles.quizTitle}>curiosity quizzes.</Text>
-          <Text style={styles.quizSubtitle}>
-            {remaining} questions waiting for recall
-          </Text>
-          <Text style={styles.quizEmptyHint}>
-            {currentItem.scanId.startsWith("general-") ? "general nature question" : "saved discovery question"}
-          </Text>
-
-          <View style={styles.quizSandPoolWrap} pointerEvents="none">
-            <Animated.View style={[styles.quizSandPoolGlow, poolStyle]} />
-          </View>
-
-          <GestureDetector gesture={recallGesture}>
-            <Animated.Text style={[styles.quizRecallText, recallStyle]}>
-              ↓ drag to recall
-            </Animated.Text>
-          </GestureDetector>
-        </View>
-      )}
-
-      {!loading && currentItem && stage !== "lobby" && (
-        <View style={styles.quizQuestionLayer}>
-          <View style={styles.quizCharcoalBg} pointerEvents="none" />
-
-          <Animated.View
-            pointerEvents="none"
-            style={[
-              styles.quizWave,
-              waveStyle,
-              { backgroundColor: correct ? "#16a34a" : "#f97316" },
-            ]}
-          />
-
-          {stage === "question" && (
-            <View style={styles.quizQuestionContent}>
-              <Text style={styles.quizPrompt}>{currentItem.prompt}</Text>
-
-              <View style={styles.quizTruthWrap}>
-                <View pointerEvents="none" style={styles.quizTruthGlow}>
-                  <LinearGradient
-                    colors={[
-                      "rgba(59,130,246,0.75)",
-                      "rgba(59,130,246,0.25)",
-                      "rgba(59,130,246,0)",
-                    ]}
-                    style={StyleSheet.absoluteFill}
-                  />
-                </View>
-                <View style={styles.quizTruthCircle}>
-                  <BlurView
-                    intensity={40}
-                    tint="dark"
-                    style={StyleSheet.absoluteFill}
-                  />
-                  <Text style={styles.quizTruthCircleText}>
-                    drag truth here
-                  </Text>
-                </View>
-              </View>
-
-              <View style={styles.quizOptionsList}>
-                {currentItem.options.map((option, optionIndex) => (
-                  <GestureDetector
-                    key={option}
-                    gesture={optionGestures[optionIndex]}
-                  >
-                    <Animated.Text
-                      style={[styles.quizOptionText, optionStyles[optionIndex]]}
-                    >
-                      {String.fromCharCode(97 + optionIndex)}. {option}
-                    </Animated.Text>
-                  </GestureDetector>
-                ))}
-              </View>
-            </View>
-          )}
-
-          {stage === "synthesis" && showFact && (
-            <View style={styles.quizFactLayer}>
-              <Text style={styles.quizFactText}>{currentItem.fact}</Text>
-              <View style={styles.retentionRow}>
-                <Text style={styles.retainedHint}>drag right to retain</Text>
-                <View style={styles.retainedTrack}>
-                  <GestureDetector gesture={retainedGesture}>
-                    <Animated.Text
-                      style={[styles.retainedActive, retainedStyle]}
-                    >
-                      {saving ? "saving..." : "retained"}
-                    </Animated.Text>
-                  </GestureDetector>
-                </View>
-              </View>
-            </View>
-          )}
-        </View>
-      )}
-
-      {!!error && <Text style={styles.quizError}>{error}</Text>}
-    </Animated.View>
-  );
-}
-
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: "#0a0a0a" },
-  content: { padding: 28, paddingTop: 62, paddingBottom: 80 },
-  back: { color: "#84cc16", fontSize: 15, fontWeight: "800", marginBottom: 38 },
-  eyebrow: {
-    color: "#84cc16",
-    fontSize: 12,
-    fontWeight: "800",
-    letterSpacing: 2,
-    textTransform: "uppercase",
-    marginBottom: 12,
-  },
-  panel: { borderTopWidth: 1, borderTopColor: "#263226", paddingTop: 22 },
-  panelTitle: {
-    color: "#fff",
-    fontSize: 38,
-    lineHeight: 42,
-    fontWeight: "900",
-  },
-  panelSubtitle: {
-    color: "#84cc16",
-    fontSize: 12,
-    fontWeight: "800",
-    letterSpacing: 1.5,
-    textTransform: "uppercase",
-    marginTop: 8,
-    marginBottom: 30,
-  },
-  result: {
-    color: "rgba(255,255,255,0.72)",
-    fontSize: 15,
-    lineHeight: 23,
-    marginVertical: 20,
-  },
-  row: { flexDirection: "row", gap: 10 },
-  action: {
-    alignSelf: "flex-start",
-    backgroundColor: "#84cc16",
-    paddingHorizontal: 16,
-    paddingVertical: 13,
-    marginTop: 12,
-  },
-  actionText: {
-    color: "#10150d",
-    fontSize: 12,
-    fontWeight: "900",
-    textTransform: "uppercase",
-    letterSpacing: 0.8,
-  },
-  disabled: { opacity: 0.45 },
   error: { color: "#fca5a5", marginTop: 16, lineHeight: 20 },
-  question: {
-    color: "#fff",
-    fontSize: 25,
-    lineHeight: 32,
-    fontWeight: "800",
-    marginBottom: 18,
-  },
-  answer: { color: "#bef264", fontSize: 16, lineHeight: 24, marginBottom: 10 },
-  muted: {
-    color: "rgba(255,255,255,0.48)",
-    fontSize: 13,
-    lineHeight: 20,
-    marginTop: 16,
-  },
   bioRoot: { flex: 1, backgroundColor: "#090909" },
   bioFallback: { flex: 1, backgroundColor: "#0f1110" },
   bioOverlay: {
     ...StyleSheet.absoluteFill,
     backgroundColor: "rgba(6,7,6,0.56)",
   },
-  gridOverlay: {
-    ...StyleSheet.absoluteFill,
-    borderColor: "rgba(255,255,255,0.05)",
-    borderWidth: 1,
-  },
   bioNavRow: {
     position: "absolute",
-    top: 82,
-    left: 22,
+    left: 28,
+    right: 28,
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
@@ -1173,14 +598,28 @@ const styles = StyleSheet.create({
   },
   bioBack: { color: "#f8fafc", fontSize: 14, fontWeight: "700" },
   bioHint: { color: "rgba(255,255,255,0.44)", fontSize: 12 },
-  consentScroll: { position: "absolute", top: 135, bottom: 30, left: 22, right: 22, zIndex: 9 },
-  consentContent: { flexGrow: 1, justifyContent: "center", paddingVertical: 20 },
-  reticleLayer: {
-    position: "absolute",
-    top: "30%",
-    width: "100%",
+  bioScroll: { position: "absolute", left: 0, right: 0, bottom: 0, zIndex: 9 },
+  bioContent: { paddingHorizontal: 28, paddingTop: 16 },
+  bioEyebrow: { color: "#a5e9bb", fontSize: 11, fontWeight: "800", letterSpacing: 1.7 },
+  bioTitle: { color: "#fff", fontSize: 48, lineHeight: 52, fontWeight: "900", letterSpacing: -2, marginTop: 12 },
+  bioIntro: { color: "#e1eee4", fontSize: 16, lineHeight: 24, marginTop: 12, maxWidth: 330 },
+  bioInfoCard: { backgroundColor: "rgba(16, 33, 22, 0.94)", borderWidth: 1, borderColor: "#3d6c4d", borderRadius: 20, padding: 18, marginTop: 20 },
+  bioCardLabel: { color: "#a5e9bb", fontSize: 10, fontWeight: "800", letterSpacing: 1.5 },
+  bioBody: { color: "#e2eee5", fontSize: 14, lineHeight: 21, marginTop: 10 },
+  bioNotice: { color: "#c5f2d1", fontSize: 14, lineHeight: 21, marginTop: 18 },
+  scanArea: {
+    minHeight: 270,
     alignItems: "center",
-    zIndex: 9,
+    justifyContent: "center",
+    marginTop: 12,
+  },
+  permissionCard: {
+    width: "100%",
+    backgroundColor: "rgba(16, 33, 22, 0.94)",
+    borderWidth: 1,
+    borderColor: "#3d6c4d",
+    borderRadius: 20,
+    padding: 20,
   },
   reticleAura: {
     width: 260,
@@ -1195,33 +634,19 @@ const styles = StyleSheet.create({
     width: 140,
     height: 140,
     borderRadius: 80,
-    borderWidth: 1,
-    backgroundColor: "rgba(0,0,0,0.32)",
+    borderWidth: 2,
+    backgroundColor: "rgba(9,24,14,0.85)",
     alignItems: "center",
     justifyContent: "center",
   },
   reticleText: {
-    color: "rgba(255,255,255,0.82)",
+    color: "#fff",
     fontSize: 11,
     fontWeight: "700",
     textTransform: "uppercase",
     letterSpacing: 1.2,
   },
-  permissionButton: {
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.2)",
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    backgroundColor: "rgba(9,10,9,0.65)",
-  },
-  permissionText: {
-    color: "#f8fafc",
-    fontSize: 11,
-    fontWeight: "700",
-    textTransform: "uppercase",
-    letterSpacing: 1,
-  },
+  reticleSubtext: { color: "#c5e1cd", fontSize: 12, marginTop: 4 },
   processingLayer: {
     ...StyleSheet.absoluteFill,
     justifyContent: "center",
@@ -1234,28 +659,18 @@ const styles = StyleSheet.create({
     height: 220,
     backgroundColor: "rgba(74,222,128,0.16)",
   },
-  telemetryBox: {
-    position: "absolute",
-    top: 90,
-    right: 18,
-    gap: 8,
-    maxWidth: 260,
-  },
-  telemetry: {
-    color: "rgba(220,252,231,0.92)",
-    fontSize: 12,
-    textTransform: "lowercase",
-    letterSpacing: 0.5,
-  },
+  processingCard: { width: "85%", maxWidth: 360, backgroundColor: "#102116", borderWidth: 1, borderColor: "#3d6c4d", borderRadius: 24, padding: 24 },
+  processingTitle: { color: "#fff", fontSize: 32, lineHeight: 37, fontWeight: "900", letterSpacing: -1, marginTop: 15 },
+  processingNote: { color: "#b9d1c0", fontSize: 12, lineHeight: 18, marginTop: 18 },
   dossierSheet: {
     position: "absolute",
     bottom: 0,
     left: 0,
     right: 0,
     height: "85%",
-    backgroundColor: "#0b0c0b",
+    backgroundColor: "#0b160f",
     borderTopWidth: 1,
-    borderTopColor: "#1f2937",
+    borderTopColor: "#437853",
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
     overflow: "hidden",
@@ -1263,320 +678,39 @@ const styles = StyleSheet.create({
     paddingTop: 20,
     zIndex: 11,
   },
-  dossierBlob: {
-    position: "absolute",
-    top: 16,
-    left: 14,
-    width: 180,
-    height: 120,
-    borderRadius: 90,
-    backgroundColor: "rgba(34,197,94,0.24)",
-  },
+  dossierCard: { backgroundColor: "#14271b", borderWidth: 1, borderColor: "#315c3f", borderRadius: 18, padding: 18, marginTop: 12 },
   dossierTitle: {
     color: "#fff",
     fontSize: 46,
     lineHeight: 48,
     fontWeight: "900",
     letterSpacing: -1.5,
-    marginTop: 24,
+    marginTop: 12,
   },
   dossierSubtitle: {
-    color: "rgba(226,232,240,0.72)",
+    color: "#bed7c5",
     fontSize: 17,
     fontStyle: "italic",
     marginTop: 6,
     marginBottom: 16,
   },
   dossierRow: {
-    color: "rgba(241,245,249,0.88)",
-    fontSize: 13,
-    lineHeight: 20,
-    marginBottom: 8,
+    color: "#e2eee5",
+    fontSize: 15,
+    lineHeight: 23,
+    marginTop: 10,
   },
   matchText: {
-    color: "#86efac",
-    fontSize: 13,
-    fontWeight: "800",
-    marginTop: 6,
-  },
-  quizRitualRow: {
-    marginTop: 18,
-    alignItems: "flex-start",
-  },
-  quizLabel: { color: "rgba(226,232,240,0.88)", fontSize: 14 },
-  quizWordWrap: {
-    marginTop: 10,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 14,
-  },
-  quizWordTarget: {
-    color: "rgba(255,255,255,0.2)",
-    fontWeight: "800",
-    fontSize: 44,
-    letterSpacing: -1.5,
-    textTransform: "lowercase",
-  },
-  quizWordActive: {
-    color: "#16a34a",
-    fontWeight: "900",
-    fontSize: 44,
-    letterSpacing: -1.5,
-    textTransform: "lowercase",
-  },
-  quizWordActiveSnapped: { color: "#ffffff" },
-  discoveredRow: { marginTop: 26 },
-  discoveredLabel: {
-    color: "rgba(226,232,240,0.58)",
-    fontSize: 11,
-    textTransform: "uppercase",
-    letterSpacing: 1.1,
-    marginBottom: 10,
-  },
-  discoveredWordWrap: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    alignItems: "center",
-    gap: 10,
-  },
-  discoveredTarget: {
-    color: "rgba(255,255,255,0.2)",
-    fontSize: 26,
-    lineHeight: 30,
-    fontWeight: "900",
-    letterSpacing: -0.8,
-    textTransform: "lowercase",
-  },
-  discoveredWordActive: {
-    color: "#16a34a",
-    fontSize: 26,
-    lineHeight: 30,
-    fontWeight: "900",
-    letterSpacing: -0.8,
-    textTransform: "lowercase",
-  },
-  discoveredWordSaving: { color: "#f8fafc" },
-  modeSelector: {
-    position: "absolute",
-    bottom: 38,
-    width: "100%",
-    height: 64,
-    zIndex: 15,
-    backgroundColor: "transparent",
-  },
-  quizRoot: { flex: 1, backgroundColor: "#0a0a0a" },
-  quizNavRow: {
-    position: "absolute",
-    top: 120,
-    left: 22,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    zIndex: 10,
-  },
-  quizNavBackDark: { color: "#0a0a0a", fontSize: 14, fontWeight: "700" },
-  quizNavHintDark: { color: "rgba(10,10,10,0.5)", fontSize: 12 },
-  quizLobbyLayer: {
-    flex: 1,
-    paddingHorizontal: 28,
-    paddingTop: 230,
-  },
-  quizLoadingLayer: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 28,
-  },
-  quizEmptyLayer: {
-    flex: 1,
-    justifyContent: "center",
-    paddingHorizontal: 28,
-    paddingTop: 86,
-  },
-  quizLoadingText: {
-    color: "rgba(255,255,255,0.6)",
-    fontSize: 14,
-    textAlign: "center",
-  },
-  quizTitle: {
-    color: "#fff",
-    fontSize: 46,
-    lineHeight: 48,
-    fontWeight: "900",
-    letterSpacing: -1.5,
-  },
-  quizSubtitle: {
-    color: "rgba(226,232,240,0.72)",
-    fontSize: 15,
-    marginTop: 10,
-    marginBottom: 24,
-  },
-  quizSandPoolGlow: {
-    position: "absolute",
-    bottom: -160,
-    width: 420,
-    height: 420,
-    borderRadius: 210,
-    backgroundColor: "rgba(59,130,246,0.35)",
-  },
-  quizEmptyHint: {
-    color: "rgba(226,232,240,0.5)",
+    color: "#f1e4be",
+    backgroundColor: "#373322",
+    borderLeftWidth: 3,
+    borderLeftColor: "#dfc877",
+    borderRadius: 8,
+    padding: 14,
     fontSize: 13,
     lineHeight: 20,
-    marginTop: 14,
-  },
-  quizRetryText: {
-    color: "#84cc16",
-    fontSize: 14,
-    fontWeight: "800",
-    textTransform: "uppercase",
-    letterSpacing: 1,
-    marginTop: 18,
-  },
-  quizSandPoolWrap: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: "32%",
-    overflow: "hidden",
-  },
-  quizSandPool: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: "40%",
-    alignItems: "center",
-    justifyContent: "flex-end",
-    overflow: "hidden",
-  },
-  quizRecallText: {
-    position: "absolute",
-    bottom: "40%",
-    left: 0,
-    right: 0,
-    textAlign: "center",
-    color: "rgba(226,232,240,0.85)",
-    fontSize: 15,
-    fontWeight: "800",
-    textTransform: "uppercase",
-    letterSpacing: 1,
-  },
-  quizQuestionLayer: { flex: 1 },
-  quizCharcoalBg: {
-    ...StyleSheet.absoluteFill,
-    backgroundColor: "#0a0a0a",
-  },
-  quizWave: { ...StyleSheet.absoluteFill },
-
-  quizSynthesisCanvas: {
-    ...StyleSheet.absoluteFill,
-    backgroundColor: "#f5f4ed",
-    zIndex: 1,
-  },
-  quizQuestionContent: {
-    flex: 1,
-    paddingHorizontal: 26,
-    paddingTop: 140,
-    zIndex: 2,
-  },
-  quizPrompt: {
-    color: "#fff",
-    fontSize: 34,
-    lineHeight: 40,
-    fontWeight: "900",
-    letterSpacing: -1,
-    textAlign: "center",
-    marginBottom: 40,
-  },
-  quizTruthWrap: {
-    alignSelf: "center",
-    width: 170,
-    height: 170,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 40,
-  },
-  quizTruthGlow: {
-    position: "absolute",
-    width: 260,
-    height: 260,
-    borderRadius: 130,
-    overflow: "hidden",
-    opacity: 0.85,
-  },
-  quizTruthCircle: {
-    width: 170,
-    height: 170,
-    borderRadius: 85,
-    borderWidth: 1,
-    borderColor: "rgba(96,165,250,0.5)",
-    backgroundColor: "rgba(59,130,246,0.12)",
-    alignItems: "center",
-    justifyContent: "center",
-    overflow: "hidden",
-  },
-  quizTruthCircleText: {
-    color: "rgba(219,234,254,0.9)",
-    fontSize: 12,
     fontWeight: "700",
-    textTransform: "uppercase",
-    letterSpacing: 1,
+    marginTop: 16,
   },
-  quizOptionsList: { gap: 24 },
-  quizOptionText: {
-    color: "rgba(241,245,249,0.92)",
-    fontSize: 17,
-    fontWeight: "600",
-    textAlign: "left",
-  },
-  quizFactLayer: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 30,
-    zIndex: 2,
-  },
-  quizFactText: {
-    color: "#fff",
-    fontSize: 24,
-    lineHeight: 32,
-    fontWeight: "800",
-    textAlign: "center",
-    marginBottom: 50,
-  },
-  retentionRow: { alignItems: "center" },
-  retainedHint: {
-    color: "rgba(255,255,255,0.5)",
-    fontSize: 12,
-    fontWeight: "700",
-    textTransform: "uppercase",
-    letterSpacing: 1.2,
-    marginBottom: 14,
-  },
-  retainedTrack: {
-    width: 220,
-    height: 44,
-    justifyContent: "center",
-  },
-  retainedActive: {
-    color: "#16a34a",
-    fontSize: 16,
-    fontWeight: "800",
-    textTransform: "lowercase",
-  },
-  quizError: {
-    color: "#fecaca",
-    position: "absolute",
-    bottom: 40,
-    left: 24,
-    right: 24,
-    textAlign: "center",
-    backgroundColor: "rgba(10,10,10,0.72)",
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 12,
-    overflow: "hidden",
-  },
+  dossierNote: { color: "#bdcfc2", fontSize: 13, lineHeight: 20, marginTop: 16 },
 });

@@ -31,3 +31,21 @@ test("physiological sigh includes a second inhale before exhaling", () => {
     ["inhale", "second inhale", "exhale", "rest", "inhale"]);
   assert.notEqual(getBreathPhase("calm-down", 0).key, getBreathPhase("calm-down", 13).key);
 });
+
+test("saved sessions retain the selected guidance and support earlier sessions", () => {
+  const sessionSource = fs.readFileSync(path.join(__dirname, "..", "src", "lib", "focus", "breathingSession.ts"), "utf8");
+  const sessionJs = ts.transpileModule(sessionSource, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+  }).outputText;
+  const sessionModule = { exports: {} };
+  new Function("module", "exports", sessionJs)(sessionModule, sessionModule.exports);
+  const { parseBreathingSession } = sessionModule.exports;
+  assert.equal(parseBreathingSession([null, null, null, null, null], 1000), null);
+  const legacy = ["session", "5000", "recenter", "300", null];
+  assert.equal(parseBreathingSession(legacy, 1000).guidance, "chest");
+  assert.equal(parseBreathingSession(legacy, 1000).remaining, 4);
+  assert.equal(parseBreathingSession(["session", "5000", "recenter", "300", "flexible"], 6000).remaining, 0);
+  assert.equal(parseBreathingSession(["session", "5000", "recenter", "300", "flexible"], 1000).guidance, "flexible");
+  assert.throws(() => parseBreathingSession(["session", "5000", "recenter", "300", "invalid"], 1000), /guidance/);
+  assert.throws(() => parseBreathingSession(["session", null, "recenter", "300", "chest"], 1000), /incomplete/);
+});

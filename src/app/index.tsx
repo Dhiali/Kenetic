@@ -1168,8 +1168,8 @@ function Outdoors({ onBack }: { onBack: () => void }) {
           description: "Recall what you discovered outside.",
         },
         {
-          title: "spot finder.",
-          description: "Find trails, waters, and sanctuaries nearby.",
+          title: "spot keeper.",
+          description: "Save places you find calming.",
         },
         {
           title: "daily challenges.",

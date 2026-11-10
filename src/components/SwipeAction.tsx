@@ -50,7 +50,7 @@ export default function SwipeAction({ label, onActivate, disabled = false, tone 
         style={[styles.action, animatedStyle, disabled && styles.disabled]}
       >
         <Text style={[styles.label, tone === "light" && styles.lightLabel]}>{label}</Text>
-        <Text style={[styles.hint, tone === "light" && styles.lightHint]}>drag right →</Text>
+        <Text style={[styles.hint, tone === "light" && styles.lightHint]}>Drag right →</Text>
       </Animated.View>
     </GestureDetector>
   );

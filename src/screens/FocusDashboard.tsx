@@ -22,6 +22,7 @@ import {
     persistFocusFeatureLaunch,
 } from "../lib/firebase/bootstrap";
 import { firebaseErrorMessage } from "../lib/firebase/errors";
+import { formatFocusTime } from "../lib/focus/activity";
 
 const triggerFocusImpact = () => {
   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined);
@@ -46,6 +47,10 @@ export default function FocusDashboard({
     getShitDoneMinutes: 0,
     alienModeMinutes: 0,
     totalFocusMinutes: 0,
+    totalFocusSeconds: 0,
+    getShitDoneSeconds: 0,
+    alienModeSeconds: 0,
+    recent: { sessionsCompleted: 0, activeDays: 0, seconds: 0 },
   });
   const [launchError, setLaunchError] = React.useState<string | null>(null);
   const [metricsError, setMetricsError] = React.useState(false);
@@ -160,7 +165,7 @@ export default function FocusDashboard({
         <GestureDetector gesture={exitGesture}>
           <View style={styles.nav}>
             <Text style={styles.back}>Dashboard → </Text>
-            <Text style={styles.hint}>(drag right to exit focus state)</Text>
+            <Text style={styles.hint}>(Drag right to exit focus state)</Text>
           </View>
         </GestureDetector>
         <Text style={styles.title}>Focus state.</Text>
@@ -169,7 +174,7 @@ export default function FocusDashboard({
         <View style={styles.gateways}>
           <Gateway
             title="Get shit done."
-            label="music & focus timer"
+            label="Music & focus timer"
             description="Open Apple Music or Spotify to choose your sound. Your focus timer starts when you return to Kenetic."
             onLaunch={() => void launchFeature("get-shit-done", onGetShitDone)}
           />
@@ -182,32 +187,29 @@ export default function FocusDashboard({
         </View>
         <Text style={styles.statsHeading}>YOUR FOCUS ACTIVITY</Text>
         {!metricsLoaded && !metricsError && <Text style={styles.loading}>Loading your activity...</Text>}
-        {metricsLoaded && <View style={styles.metrics}>
-          <Metric
-            value={`${metrics.completedSessions}`}
-            label="completed sessions"
-          />
-          <Metric
-            value={`${metrics.totalFocusMinutes}m`}
-            label="focus time completed"
-          />
-          <Metric
-            value={`${metrics.getShitDoneSessions}`}
-            label="get shit done sessions"
-          />
-          <Metric
-            value={`${metrics.alienModeSessions}`}
-            label="alien mode sessions"
-          />
-          <Metric
-            value={`${metrics.alienModeMinutes}m`}
-            label="alien mode time completed"
-          />
-          <Metric
-            value={`${metrics.handoffCompletedSessions}`}
-            label="music handoffs completed"
-          />
-        </View>}
+        {metricsLoaded && (
+          <View style={styles.activity}>
+            <View style={styles.recentCard}>
+              <Text style={styles.activityLabel}>LAST 7 DAYS</Text>
+              <Text style={styles.recentTime}>{formatFocusTime(metrics.recent.seconds)}</Text>
+              <Text style={styles.recentCaption}>Of completed focus</Text>
+              <View style={styles.recentDetails}>
+                <Text style={styles.recentDetail}>{metrics.recent.sessionsCompleted} {metrics.recent.sessionsCompleted === 1 ? "session" : "sessions"}</Text>
+                <Text style={styles.recentDetail}>{metrics.recent.activeDays} {metrics.recent.activeDays === 1 ? "active day" : "active days"}</Text>
+              </View>
+            </View>
+            <View style={styles.metrics}>
+              <Metric value={`${metrics.completedSessions}`} label="All-time sessions" />
+              <Metric value={formatFocusTime(metrics.totalFocusSeconds)} label="All-time focus" />
+            </View>
+            <View style={styles.modeCard}>
+              <Text style={styles.activityLabel}>ALL-TIME BY MODE</Text>
+              <ModeSummary label="Get shit done" sessions={metrics.getShitDoneSessions} seconds={metrics.getShitDoneSeconds} />
+              <ModeSummary label="Alien mode" sessions={metrics.alienModeSessions} seconds={metrics.alienModeSeconds} />
+            </View>
+            <Text style={styles.activityNote}>Completed sessions only. Last 7 days includes today.</Text>
+          </View>
+        )}
         {metricsError && (
           <SwipeAction label="Focus statistics unavailable. Retry" onActivate={() => setReloadToken((value) => value + 1)} />
         )}
@@ -221,6 +223,18 @@ function Metric({ value, label }: { value: string; label: string }) {
     <View style={styles.metric}>
       <Text style={styles.metricValue}>{value}</Text>
       <Text style={styles.metricLabel}>{label}</Text>
+    </View>
+  );
+}
+
+function ModeSummary({ label, sessions, seconds }: { label: string; sessions: number; seconds: number }) {
+  return (
+    <View style={styles.modeRow}>
+      <View style={styles.modeInfo}>
+        <Text style={styles.modeName}>{label}</Text>
+        <Text style={styles.modeSessions}>{sessions} {sessions === 1 ? "Session" : "Sessions"}</Text>
+      </View>
+      <Text style={styles.modeTime}>{formatFocusTime(seconds)}</Text>
     </View>
   );
 }
@@ -275,7 +289,7 @@ function Gateway({
         <Text style={styles.gatewayTitle}>{title}</Text>
         <Text style={styles.gatewayLabel}>{label}</Text>
         <Text style={styles.gatewayDescription}>{description}</Text>
-        <Text style={styles.gatewayHint}>← swipe to open</Text>
+        <Text style={styles.gatewayHint}>        ← Swipe to open</Text>
       </Animated.View>
     </GestureDetector>
   );
@@ -317,6 +331,13 @@ const styles = StyleSheet.create({
   intro: { color: "#ded0d3", fontSize: 16, lineHeight: 24, marginBottom: 30 },
   statsHeading: { color: "#ff9aaa", fontSize: 11, letterSpacing: 1.6, fontWeight: "800", marginTop: 42, marginBottom: 18 },
   loading: { color: "#d0c4c6", fontSize: 14 },
+  activity: { gap: 10 },
+  recentCard: { backgroundColor: "#3d1c28", borderWidth: 1, borderColor: "#89465a", borderRadius: 20, padding: 20 },
+  activityLabel: { color: "#ff9aaa", fontSize: 10, fontWeight: "800", letterSpacing: 1.5 },
+  recentTime: { color: "#fff", fontSize: 42, fontWeight: "900", letterSpacing: -1.5, marginTop: 10 },
+  recentCaption: { color: "#e5d1d7", fontSize: 13, marginTop: 2 },
+  recentDetails: { flexDirection: "row", flexWrap: "wrap", gap: 16, borderTopWidth: 1, borderTopColor: "#855362", marginTop: 18, paddingTop: 14 },
+  recentDetail: { color: "#f7e6ea", fontSize: 13, fontWeight: "700" },
   metrics: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
   metric: { width: "48%", flexGrow: 1, backgroundColor: "#191417", borderRadius: 16, padding: 15, minHeight: 95 },
   metricValue: {
@@ -333,6 +354,13 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
     flexShrink: 1,
   },
+  modeCard: { backgroundColor: "#191417", borderRadius: 16, padding: 18 },
+  modeRow: { flexDirection: "row", alignItems: "center", borderTopWidth: 1, borderTopColor: "#3e3035", marginTop: 14, paddingTop: 14, gap: 12 },
+  modeInfo: { flex: 1 },
+  modeName: { color: "#fff", fontSize: 15, fontWeight: "800" },
+  modeSessions: { color: "#c8bdc0", fontSize: 12, marginTop: 4 },
+  modeTime: { color: "#ffb6c4", fontSize: 18, fontWeight: "800" },
+  activityNote: { color: "#c8bdc0", fontSize: 12, lineHeight: 18, marginTop: 4 },
   gateways: { gap: 14 },
   gateway: { borderWidth: 1, borderColor: "#6d3342", borderRadius: 24, backgroundColor: "#23151a", padding: 22 },
   gatewayTitle: {

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
     ActivityIndicator,
     Image,
@@ -45,7 +45,7 @@ const sections = {
   privacy:
     "Your data is encrypted. We do not sell physiological metrics to third parties.",
   terms:
-    "By using kenetic, you agree to respect your own boundaries. Do not use while driving or operating machinery.",
+    "By using Kenetic, you agree to respect your own boundaries. Do not use while driving or operating machinery.",
   support:
     "Need a hand? Email terminal@kenetic.app and our support team will help.",
 };
@@ -53,12 +53,12 @@ const sections = {
 const PHOTO_OPTIONS = [
   {
     id: "sunlit",
-    label: "sunlit",
+    label: "Sunlit",
     uri: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=85",
   },
   {
     id: "quiet",
-    label: "quiet",
+    label: "Quiet",
     uri: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=400&q=85",
   },
 ];
@@ -84,6 +84,7 @@ export default function ProfileScreen({
   const [showPhotoOptions, setShowPhotoOptions] = useState(false);
   const [showDeleteReauth, setShowDeleteReauth] = useState(false);
   const [deletePassword, setDeletePassword] = useState("");
+  const logoutInProgress = useRef(false);
   const aiConsent = useAiConsent();
   const blobProgress = useSharedValue(0);
 
@@ -145,25 +146,9 @@ export default function ProfileScreen({
     transform: [{ translateX: editX.value }],
   }));
 
-  const logoutX = useSharedValue(0);
-  const logoutGesture = Gesture.Pan()
-    .enabled(!saving)
-    .onUpdate((event) => {
-      logoutX.value = Math.max(0, Math.min(100, event.translationX));
-    })
-    .onEnd((event) => {
-      if (event.translationX > 70) {
-        runOnJS(hapticLight)();
-        runOnJS(logout)();
-      } else {
-        logoutX.value = withSpring(0, { damping: 15, stiffness: 200 });
-      }
-    });
-  const logoutStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: logoutX.value }],
-  }));
-
   const logout = async () => {
+    if (logoutInProgress.current) return;
+    logoutInProgress.current = true;
     setSaving(true);
     setMessage(null);
     try {
@@ -172,9 +157,31 @@ export default function ProfileScreen({
     } catch (error) {
       setMessage(firebaseErrorMessage(error));
     } finally {
+      logoutInProgress.current = false;
       setSaving(false);
     }
   };
+
+  const logoutX = useSharedValue(0);
+  const logoutGesture = Gesture.Pan()
+    .enabled(!saving)
+    .activeOffsetX(10)
+    .failOffsetY([-15, 15])
+    .onUpdate((event) => {
+      logoutX.value = Math.max(0, Math.min(100, event.translationX));
+    })
+    .onEnd((event) => {
+      if (event.translationX > 70) {
+        runOnJS(hapticLight)();
+        runOnJS(logout)();
+      }
+    })
+    .onFinalize(() => {
+      logoutX.value = withSpring(0, { damping: 15, stiffness: 200 });
+    });
+  const logoutStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: logoutX.value }],
+  }));
 
   const saveName = async () => {
     setSaving(true);
@@ -258,7 +265,7 @@ export default function ProfileScreen({
             alwaysBounceVertical
           >
           <View style={styles.deleteReauthPanel}>
-            <Text style={styles.deleteReauthTitle}>confirm deletion.</Text>
+            <Text style={styles.deleteReauthTitle}>Confirm deletion.</Text>
             <Text style={styles.deleteReauthText}>
               This permanently deletes your profile and saved data. Enter your
               current password to confirm.
@@ -269,21 +276,21 @@ export default function ProfileScreen({
               onChangeText={setDeletePassword}
               secureTextEntry
               autoCapitalize="none"
-              placeholder="current password"
+              placeholder="Current password"
               placeholderTextColor={colors.white50}
               style={styles.deletePasswordInput}
             />
             {message && <Text style={styles.message}>{message}</Text>}
             <View style={styles.deleteReauthActions}>
               <SwipeAction
-                label="cancel"
+                label="Cancel"
                 onActivate={() => {
                   setDeletePassword("");
                   setShowDeleteReauth(false);
                 }}
                 disabled={saving}
               />
-              <SwipeAction label={saving ? "deleting..." : "delete permanently"} onActivate={() => void deleteAccount()} disabled={saving} />
+              <SwipeAction label={saving ? "Deleting..." : "Delete permanently"} onActivate={() => void deleteAccount()} disabled={saving} />
             </View>
           </View>
           </ScrollView>
@@ -300,7 +307,7 @@ export default function ProfileScreen({
         keyboardDismissMode="on-drag"
         alwaysBounceVertical
       >
-        <Text style={styles.eyebrow}>your profile</Text>
+        <Text style={styles.eyebrow}>Your profile</Text>
         <View style={styles.identity}>
           <View style={styles.photoRow}>
             <Animated.View style={[styles.avatar, avatarStyle]}>
@@ -315,14 +322,14 @@ export default function ProfileScreen({
             <GestureDetector gesture={editGesture}>
               <Animated.View style={[styles.photoEdit, editStyle]}>
                 <Text style={styles.photoEditText}>
-                  {saving ? "saving..." : "swipe right to edit →"}
+                  {saving ? "Saving..." : "Swipe right to edit →"}
                 </Text>
               </Animated.View>
             </GestureDetector>
           </View>
           {showPhotoOptions && (
             <View style={styles.photoOptions}>
-              <Text style={styles.photoOptionsTitle}>choose your image</Text>
+              <Text style={styles.photoOptionsTitle}>Choose your image</Text>
               <View style={styles.photoChoices}>
                 {PHOTO_OPTIONS.map((option) => (
                   <View
@@ -334,7 +341,7 @@ export default function ProfileScreen({
                       style={styles.choiceImage}
                     />
                     <Text style={styles.choiceLabel}>{option.label}</Text>
-                    <SwipeAction label={`choose ${option.label}`} onActivate={() => void choosePhoto(option.uri)} disabled={saving} />
+                    <SwipeAction label={`Choose ${option.label}`} onActivate={() => void choosePhoto(option.uri)} disabled={saving} />
                   </View>
                 ))}
               </View>
@@ -348,22 +355,22 @@ export default function ProfileScreen({
                 value={name}
                 onChangeText={setName}
                 autoFocus
-                placeholder="your name"
+                placeholder="Your name"
                 placeholderTextColor={colors.white40}
                 style={styles.nameInput}
               />
-              <SwipeAction label={saving ? "saving..." : "save name"} onActivate={() => void saveName()} disabled={saving} />
+              <SwipeAction label={saving ? "Saving..." : "Save name"} onActivate={() => void saveName()} disabled={saving} />
             </View>
           ) : (
             <Text style={styles.nameText}>
-              {name.toLowerCase() || "your name"}.
+              {name || "Your name"}.
             </Text>
           )}
           {!editing && (
-            <SwipeAction label="edit name" onActivate={() => setEditing(true)} />
+            <SwipeAction label="Edit name" onActivate={() => setEditing(true)} />
           )}
           <View style={styles.emailBlock}>
-            <Text style={styles.emailLabel}>email</Text>
+            <Text style={styles.emailLabel}>Email</Text>
             {editingEmail ? (
               <View style={styles.emailEditor}>
                 <TextInput
@@ -372,7 +379,7 @@ export default function ProfileScreen({
                   autoCapitalize="none"
                   keyboardType="email-address"
                   returnKeyType="done"
-                  placeholder="your email"
+                  placeholder="Your email"
                   placeholderTextColor={colors.white40}
                   style={styles.emailInput}
                 />
@@ -380,21 +387,21 @@ export default function ProfileScreen({
                   value={currentPassword}
                   onChangeText={setCurrentPassword}
                   secureTextEntry
-                  placeholder="current password"
+                  placeholder="Current password"
                   placeholderTextColor={colors.white40}
                   style={styles.emailInput}
                 />
                 <View style={styles.emailActions}>
-                  <SwipeAction label={saving ? "saving..." : "save email"} onActivate={() => void saveEmail()} disabled={saving} />
-                  <SwipeAction label="cancel" onActivate={() => setEditingEmail(false)} disabled={saving} />
+                  <SwipeAction label={saving ? "Saving..." : "Save email"} onActivate={() => void saveEmail()} disabled={saving} />
+                  <SwipeAction label="Cancel" onActivate={() => setEditingEmail(false)} disabled={saving} />
                 </View>
               </View>
             ) : (
               <View style={styles.emailRow}>
                 <Text style={styles.emailText}>
-                  {email || "no email connected"}
+                  {email || "No email connected"}
                 </Text>
-                <SwipeAction label="edit email" onActivate={() => setEditingEmail(true)} />
+                <SwipeAction label="Edit email" onActivate={() => setEditingEmail(true)} />
               </View>
             )}
           </View>
@@ -403,7 +410,7 @@ export default function ProfileScreen({
         <View style={styles.sectionList}>
           <View style={styles.sectionItem}>
             <SwipeAction
-              label={`${expanded === "ai" ? "close" : "open"} AI agreement`}
+              label={`${expanded === "ai" ? "Close" : "Open"} AI agreement`}
               onActivate={() => setExpanded(expanded === "ai" ? null : "ai")}
             />
             {expanded === "ai" && (
@@ -413,21 +420,21 @@ export default function ProfileScreen({
                   <>
                     <Text style={styles.sectionContent}>AI agreement active for this account.</Text>
                     <AiConsentNotice />
-                    <SwipeAction label="withdraw AI agreement" disabled={aiConsent.saving} onActivate={() => void aiConsent.change(false)} />
+                    <SwipeAction label="Withdraw AI agreement" disabled={aiConsent.saving} onActivate={() => void aiConsent.change(false)} />
                   </>
                 )}
                 {aiConsent.status === "not-agreed" && (
                   <AiConsent disabled={aiConsent.saving} onAgree={() => void aiConsent.change(true)} />
                 )}
                 {!!aiConsent.error && <Text style={styles.message}>{aiConsent.error}</Text>}
-                {aiConsent.status === "error" && <SwipeAction label="retry checking AI agreement" onActivate={() => void aiConsent.refresh()} />}
+                {aiConsent.status === "error" && <SwipeAction label="Retry checking AI agreement" onActivate={() => void aiConsent.refresh()} />}
               </View>
             )}
           </View>
           {Object.entries(sections).map(([key, value]) => (
             <View key={key} style={styles.sectionItem}>
               <SwipeAction
-                label={`${expanded === key ? "close" : "open"} ${key}`}
+                label={`${expanded === key ? "Close" : "Open"} ${key}`}
                 onActivate={() => {
                   setExpanded(expanded === key ? null : key);
                   hapticLight();
@@ -438,7 +445,7 @@ export default function ProfileScreen({
               )}
               {key === "support" && expanded === key && (
                 <SwipeAction
-                  label="email support"
+                  label="Email support"
                   onActivate={() =>
                     void Linking.openURL("mailto:terminal@kenetic.app")
                   }
@@ -447,13 +454,25 @@ export default function ProfileScreen({
             </View>
           ))}
         </View>
-        <SwipeAction label="delete account" onActivate={confirmDelete} disabled={saving} />
+        <SwipeAction label="Delete account" onActivate={confirmDelete} disabled={saving} />
         <View style={styles.footer}>
-          <SwipeAction label="dashboard" onActivate={onBack} />
+          <SwipeAction label="Dashboard" onActivate={onBack} />
           <GestureDetector gesture={logoutGesture}>
-            <Animated.View style={logoutStyle}>
-              <Text style={styles.logoutText}>logout.</Text>
-              <Text style={styles.logoutHint}>swipe right to logout →</Text>
+            <Animated.View
+              accessible
+              accessibilityRole="adjustable"
+              accessibilityLabel="Log out"
+              accessibilityHint="Swipe right or activate to log out."
+              accessibilityState={{ disabled: saving }}
+              accessibilityActions={[{ name: "activate", label: "Log out" }]}
+              onAccessibilityAction={(event) => {
+                if (!saving && event.nativeEvent.actionName === "activate") void logout();
+              }}
+              onAccessibilityTap={() => { if (!saving) void logout(); }}
+              style={logoutStyle}
+            >
+              <Text style={styles.logoutText}>Logout.</Text>
+              <Text style={styles.logoutHint}>Swipe right to logout →</Text>
             </Animated.View>
           </GestureDetector>
         </View>

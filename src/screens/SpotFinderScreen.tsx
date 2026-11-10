@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import SwipeAction from "../components/SwipeAction";
 import {
   addSavedPlace,
@@ -8,15 +9,12 @@ import {
   persistOutdoorFeatureLaunch,
   removeSavedPlace,
 } from "../lib/firebase/bootstrap";
-import { googlePlacesApiKey } from "../lib/firebase/config";
 import { firebaseErrorMessage } from "../lib/firebase/errors";
 import type { SavedPlaceRecord } from "../lib/firebase/firestore";
-import { requestForegroundLocation } from "../lib/outdoors/location";
-import { searchNearbyPlaces, type NearbyPlace } from "../lib/outdoors/places";
 
 export default function SpotFinderScreen({ onBack }: { onBack: () => void }) {
+  const insets = useSafeAreaInsets();
   const [places, setPlaces] = useState<SavedPlaceRecord[]>([]);
-  const [results, setResults] = useState<NearbyPlace[]>([]);
   const [name, setName] = useState("");
   const [address, setAddress] = useState("");
   const [editing, setEditing] = useState<string | null>(null);
@@ -24,7 +22,6 @@ export default function SpotFinderScreen({ onBack }: { onBack: () => void }) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [searchMessage, setSearchMessage] = useState("");
 
   async function load() {
     setLoading(true);
@@ -41,7 +38,7 @@ export default function SpotFinderScreen({ onBack }: { onBack: () => void }) {
   useEffect(() => {
     void load();
     void persistOutdoorFeatureLaunch("spot-finder").catch((failure) => {
-      console.warn("Could not record spot finder launch:", failure);
+      console.warn("Could not record spot keeper launch:", failure);
     });
   }, []);
 
@@ -59,82 +56,49 @@ export default function SpotFinderScreen({ onBack }: { onBack: () => void }) {
     }
   }
 
-  async function findNearby() {
-    if (busy) return;
-    setBusy(true);
-    setError("");
-    setSearchMessage("");
-    try {
-      if (!googlePlacesApiKey) {
-        throw new Error("Nearby search is not configured. You can still add a place manually below.");
-      }
-      const location = await requestForegroundLocation();
-      if (!location) throw new Error("Location permission was not granted.");
-      const found = await searchNearbyPlaces(location);
-      setResults(found);
-      if (found.length === 0) setSearchMessage("No nearby parks or hiking areas were found.");
-    } catch (failure) {
-      setError(firebaseErrorMessage(failure));
-    } finally {
-      setBusy(false);
-    }
-  }
-
   return (
     <KeyboardAvoidingView
       style={styles.screen}
       behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
     <ScrollView
-      contentContainerStyle={styles.content}
+      contentContainerStyle={[styles.content, { paddingTop: insets.top + 52, paddingBottom: insets.bottom + 48 }]}
       keyboardShouldPersistTaps="handled"
       keyboardDismissMode="on-drag"
       alwaysBounceVertical
+      showsVerticalScrollIndicator={false}
     >
-      <SwipeAction label="← outdoors" onActivate={onBack} />
-      <Text style={styles.eyebrow}>your outdoor spaces</Text>
-      <Text style={styles.title}>spot finder.</Text>
+      <SwipeAction label="Back to outdoors" onActivate={onBack} />
+      <Text style={styles.eyebrow}>OUTDOORS / SPOT KEEPER</Text>
+      <Text style={styles.title}>Spot keeper.</Text>
       <Text style={styles.copy}>
-        Save a calming place you know, or search for nearby parks and hiking areas.
+        Make a little space for the places that help you feel grounded.
       </Text>
-      <Text style={styles.notice}>
-        Nearby search requests location permission and sends your location to Google Places.
-        Google Places may require billing. Manual saved places do not use that service.
-      </Text>
-      <SwipeAction label="search nearby" disabled={busy} onActivate={() => void findNearby()} />
-      {!!searchMessage && <Text style={styles.copy}>{searchMessage}</Text>}
-      {results.map((place) => (
-        <View key={place.placeId} style={styles.item}>
-          <Text style={styles.itemTitle}>{place.name}</Text>
-          {!!place.address && <Text style={styles.copy}>{place.address}</Text>}
-          <SwipeAction
-            label={`save ${place.name}`}
-            disabled={busy}
-            onActivate={() => void perform(() => addSavedPlace(place.name, place.address))}
-          />
-        </View>
-      ))}
-      <Text style={styles.section}>add a place manually.</Text>
+      <Text style={styles.section}>Add your own.</Text>
+      <Text style={styles.sectionCopy}>Save a favorite spot to return to whenever you need it.</Text>
+      <View style={styles.formCard}>
+      <Text style={styles.fieldLabel}>PLACE NAME</Text>
       <TextInput
         accessibilityLabel="Place name"
         value={name}
         onChangeText={setName}
-        placeholder="place name"
-        placeholderTextColor="#a1a1a1"
+        placeholder="E.g. the quiet park"
+        placeholderTextColor="#91a898"
         style={styles.input}
         maxLength={100}
       />
+      <Text style={styles.fieldLabel}>ADDRESS OR DESCRIPTION <Text style={styles.optional}>(OPTIONAL)</Text></Text>
       <TextInput
         accessibilityLabel="Place address or description, optional"
         value={address}
         onChangeText={setAddress}
-        placeholder="address or description (optional)"
-        placeholderTextColor="#a1a1a1"
+        placeholder="A detail to help you find it"
+        placeholderTextColor="#91a898"
         style={styles.input}
         maxLength={200}
       />
       <SwipeAction
-        label="save place"
+        label="Save place"
         disabled={busy || !name.trim()}
         onActivate={() => void perform(async () => {
           await addSavedPlace(name, address);
@@ -142,13 +106,23 @@ export default function SpotFinderScreen({ onBack }: { onBack: () => void }) {
           setAddress("");
         })}
       />
-      <Text style={styles.section}>saved places.</Text>
-      {loading ? <ActivityIndicator color="#bef264" accessibilityLabel="Loading saved places" /> : (
-        places.length === 0 && !error ? <Text style={styles.copy}>No saved places yet.</Text> :
+      </View>
+      <View style={styles.savedHeading}>
+        <Text style={styles.savedTitle}>Saved places.</Text>
+        {!loading && <Text style={styles.count}>{places.length} {places.length === 1 ? "PLACE" : "PLACES"}</Text>}
+      </View>
+      {loading ? <ActivityIndicator color="#a5e9bb" accessibilityLabel="Loading saved places" /> : (
+        places.length === 0 && !error ? (
+          <View style={styles.emptyCard}>
+            <Text style={styles.emptyTitle}>Your collection starts here.</Text>
+            <Text style={styles.itemCopy}>Save a place above and it will be waiting here when you need it.</Text>
+          </View>
+        ) :
           places.map((place) => (
             <View key={place.placeId} style={styles.item}>
               {editing === place.placeId ? (
                 <>
+                  <Text style={styles.itemEyebrow}>EDIT PLACE NAME</Text>
                   <TextInput
                     accessibilityLabel={`Edit name for ${place.name}`}
                     value={editName}
@@ -156,43 +130,57 @@ export default function SpotFinderScreen({ onBack }: { onBack: () => void }) {
                     style={styles.input}
                     maxLength={100}
                   />
-                  <SwipeAction label="save name" disabled={busy || !editName.trim()} onActivate={() => void perform(async () => {
+                  <SwipeAction label="Save name" disabled={busy || !editName.trim()} onActivate={() => void perform(async () => {
                     await changeSavedPlaceName(place.placeId, editName);
                     setEditing(null);
                   })} />
-                  <SwipeAction label="cancel editing" disabled={busy} onActivate={() => setEditing(null)} />
+                  <SwipeAction label="Cancel editing" disabled={busy} onActivate={() => setEditing(null)} />
                 </>
               ) : (
                 <>
+                  <Text style={styles.itemEyebrow}>YOUR SAVED PLACE</Text>
                   <Text style={styles.itemTitle}>{place.name}</Text>
-                  {!!place.address && <Text style={styles.copy}>{place.address}</Text>}
-                  <SwipeAction label={`edit ${place.name}`} disabled={busy} onActivate={() => {
+                  {!!place.address && <Text style={styles.itemCopy}>{place.address}</Text>}
+                  <View style={styles.itemActions}>
+                  <SwipeAction label={`Edit ${place.name}`} disabled={busy} onActivate={() => {
                     setEditing(place.placeId);
                     setEditName(place.name);
                   }} />
-                  <SwipeAction label={`delete ${place.name}`} disabled={busy} onActivate={() => void perform(() => removeSavedPlace(place.placeId))} />
+                  <SwipeAction label={`Delete ${place.name}`} disabled={busy} onActivate={() => void perform(() => removeSavedPlace(place.placeId))} />
+                  </View>
                 </>
               )}
             </View>
           ))
       )}
-      {!!error && <Text style={styles.error}>{error}</Text>}
-      {!!error && <SwipeAction label="reload saved places" disabled={busy} onActivate={() => void load()} />}
+      {!!error && <Text accessibilityLiveRegion="polite" style={styles.error}>{error}</Text>}
+      {!!error && <SwipeAction label="Reload saved places" disabled={busy} onActivate={() => void load()} />}
     </ScrollView>
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: "#0a0a0a" },
-  content: { padding: 28, paddingTop: 58, paddingBottom: 80 },
-  eyebrow: { color: "#84cc16", fontSize: 12, fontWeight: "800", letterSpacing: 2, marginTop: 30 },
-  title: { color: "#fff", fontSize: 38, fontWeight: "900", marginTop: 12 },
-  copy: { color: "#d0d0d0", fontSize: 15, lineHeight: 23, marginTop: 12 },
-  notice: { color: "#a8b7a4", fontSize: 13, lineHeight: 20, marginTop: 18 },
-  section: { color: "#fff", fontSize: 24, fontWeight: "700", marginTop: 34, marginBottom: 12 },
-  item: { borderTopWidth: 1, borderTopColor: "#263226", paddingTop: 18, marginTop: 16 },
-  itemTitle: { color: "#fff", fontSize: 18, fontWeight: "700" },
-  input: { color: "#fff", borderBottomWidth: 1, borderColor: "#667366", paddingVertical: 12, fontSize: 16 },
+  screen: { flex: 1, backgroundColor: "#0a110c" },
+  content: { flexGrow: 1, paddingHorizontal: 28 },
+  eyebrow: { color: "#a5e9bb", fontSize: 11, fontWeight: "800", letterSpacing: 1.6, marginTop: 24 },
+  title: { color: "#fff", fontSize: 48, lineHeight: 52, fontWeight: "900", letterSpacing: -1.7, marginTop: 12 },
+  copy: { color: "#cfdfd4", fontSize: 16, lineHeight: 24, marginTop: 14 },
+  section: { color: "#fff", fontSize: 27, lineHeight: 32, fontWeight: "900", letterSpacing: -0.6, marginTop: 34 },
+  sectionCopy: { color: "#bacfc0", fontSize: 14, lineHeight: 21, marginTop: 8 },
+  formCard: { backgroundColor: "#14241a", borderWidth: 1, borderColor: "#346348", borderRadius: 22, padding: 20, marginTop: 18 },
+  fieldLabel: { color: "#a5e9bb", fontSize: 10, fontWeight: "800", letterSpacing: 1.2, marginTop: 12, marginBottom: 8 },
+  optional: { color: "#b1c9b8" },
+  input: { color: "#fff", backgroundColor: "#0a160e", borderWidth: 1, borderColor: "#3d6649", borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 16, minHeight: 48 },
+  savedHeading: { flexDirection: "row", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginTop: 36, marginBottom: 14 },
+  savedTitle: { color: "#fff", fontSize: 27, lineHeight: 32, fontWeight: "900", letterSpacing: -0.6 },
+  count: { color: "#a5e9bb", fontSize: 10, fontWeight: "800", letterSpacing: 1.3 },
+  emptyCard: { backgroundColor: "#14241a", borderRadius: 20, padding: 20, borderWidth: 1, borderColor: "#346348" },
+  emptyTitle: { color: "#fff", fontSize: 18, fontWeight: "800" },
+  item: { backgroundColor: "#14241a", borderWidth: 1, borderColor: "#346348", borderRadius: 20, padding: 20, marginTop: 10 },
+  itemEyebrow: { color: "#a5e9bb", fontSize: 10, fontWeight: "800", letterSpacing: 1.3, marginBottom: 10 },
+  itemTitle: { color: "#fff", fontSize: 20, lineHeight: 26, fontWeight: "800" },
+  itemCopy: { color: "#c5d8ca", fontSize: 14, lineHeight: 21, marginTop: 8 },
+  itemActions: { alignItems: "flex-start" },
   error: { color: "#fca5a5", lineHeight: 21, marginTop: 20 },
 });

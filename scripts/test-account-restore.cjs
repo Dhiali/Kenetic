@@ -9,10 +9,11 @@ const javascript = ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
 }).outputText;
 
-function setup({ user, profile, intention = false, profileError } = {}) {
+function setup({ user, profile, intention = false, profileError, signOutCurrentUser } = {}) {
   const created = [];
   const auth = {
     ensureAnonymousUser: async () => user,
+    signOutCurrentUser,
   };
   const firestore = {
     getUserProfile: async () => {
@@ -23,6 +24,7 @@ function setup({ user, profile, intention = false, profileError } = {}) {
       for (const [key, value] of Object.entries(data)) {
         assert.notEqual(value, undefined, `Unexpected undefined ${key}`);
       }
+
       created.push({ uid, data });
       profile = data;
     },
@@ -38,6 +40,15 @@ function setup({ user, profile, intention = false, profileError } = {}) {
   new Function("require", "module", "exports", javascript)(localRequire, mod, mod.exports);
   return { api: mod.exports, created };
 }
+
+test("sign-out completes and propagates failures", async () => {
+  let completed = false;
+  const { api } = setup({ signOutCurrentUser: async () => { completed = true; } });
+  await api.signOutCurrentAccount();
+  assert.equal(completed, true);
+  const failing = setup({ signOutCurrentUser: async () => { throw new Error("Sign-out failed"); } });
+  await assert.rejects(failing.api.signOutCurrentAccount(), /Sign-out failed/);
+});
 
 test("anonymous startup creates a valid profile without undefined email", async () => {
   const { api, created } = setup({ user: { uid: "anon", isAnonymous: true, email: null } });

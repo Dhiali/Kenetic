@@ -173,7 +173,7 @@ export default function FinishedScreen({
       {/* Text Wrapper guarantees absolute pixel-perfect overlap */}
       <View style={styles.textWrapper}>
         {/* 3. Hollow Target (Deactivated puzzle piece) */}
-        <Text style={styles.targetText}>finished</Text>
+        <Text style={styles.targetText}>Finished</Text>
 
         {/* 4. Draggable Active Text (Active puzzle piece) */}
         <GestureDetector gesture={dragGesture}>
@@ -192,12 +192,12 @@ export default function FinishedScreen({
             style={[styles.activePosition, draggableStyle]}
           >
             <Animated.Text style={[styles.activeText, activeTextColor]}>
-              finished
+              Finished
             </Animated.Text>
           </Animated.View>
         </GestureDetector>
       </View>
-      <Text style={styles.dragInstruction}>drag and drop to complete</Text>
+      <Text style={styles.dragInstruction}>Drag and drop to complete</Text>
       {error && <Text accessibilityLiveRegion="polite" style={styles.error}>{error}</Text>}
     </Animated.View>
   );
@@ -226,7 +226,6 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     letterSpacing: -2,
     color: "rgba(255, 255, 255, 0.15)", // Muted hollow outline
-    textTransform: "lowercase",
   },
   activePosition: {
     position: "absolute",
@@ -235,7 +234,6 @@ const styles = StyleSheet.create({
     fontSize: 56,
     fontWeight: "900",
     letterSpacing: -2,
-    textTransform: "lowercase",
   },
   dragInstruction: {
     position: "absolute",

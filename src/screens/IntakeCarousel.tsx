@@ -169,10 +169,10 @@ export default function IntakeScreen({
       </View>
 
       <View style={[styles.header, compact && styles.headerCompact]}>
-        <Text style={styles.eyebrow}>your first intention</Text>
+        <Text style={styles.eyebrow}>Your first intention</Text>
         <Text style={styles.title}>
           {droppedGoal
-            ? `${droppedGoal.toLowerCase()}.`
+            ? `${droppedGoal}.`
             : "What demands\nyour focus?"}
         </Text>
         <Text style={styles.subtitle}>
@@ -186,7 +186,7 @@ export default function IntakeScreen({
           <View style={styles.targetCore}>
             <Text style={styles.targetEyebrow}>YOUR INTENTION</Text>
             <Text style={styles.targetLabel}>
-              {droppedGoal ? droppedGoal.toLowerCase() : "drop here"}
+              {droppedGoal ? droppedGoal : "Drop here"}
             </Text>
           </View>
         </View>

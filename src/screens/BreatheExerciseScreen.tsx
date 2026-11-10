@@ -4,23 +4,22 @@ import { Gyroscope } from "expo-sensors";
 import React, { useEffect, useRef, useState } from "react";
 import {
     AppState,
+    ScrollView,
     StyleSheet,
     Text,
     View,
     type AppStateStatus,
 } from "react-native";
-import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, {
     cancelAnimation,
     Easing,
     FadeIn,
     FadeOut,
-    runOnJS,
     useAnimatedStyle,
     useSharedValue,
     withRepeat,
     withSequence,
-    withSpring,
     withTiming,
 } from "react-native-reanimated";
 import {
@@ -30,15 +29,18 @@ import {
 import { ensureAnonymousUser } from "../lib/firebase/auth";
 import { firebaseErrorMessage } from "../lib/firebase/errors";
 import { getBreathPhase } from "../lib/focus/breathing";
+import { parseBreathingSession, type BreathingGuidance } from "../lib/focus/breathingSession";
 import { createCompletionGate } from "../lib/focus/completionGate";
 import { scopedSessionKey } from "../lib/focus/sessionStorage";
 import SwipeAction from "../components/SwipeAction";
 import { colors } from "../theme/colors";
+import { capitalizeSentenceStarts } from "../utils/sentenceCase";
 
 const SESSION_KEY = "@kenetic/breathe-session";
 const DEADLINE_KEY = "@kenetic/breathe-deadline";
 const EXERCISE_KEY = "@kenetic/breathe-exercise";
 const DURATION_KEY = "@kenetic/breathe-duration";
+const GUIDANCE_KEY = "@kenetic/breathe-guidance";
 
 const protocols = {
   "calm-down": {
@@ -52,27 +54,27 @@ const protocols = {
     title: "4-7-8 grounding.",
     subtitle: "5-minute rhythmic reset",
     accent: colors.rose,
-    description: "inhale for four, hold for seven, exhale for eight.",
+    description: "Inhale for four, hold for seven, exhale for eight.",
     duration: 300,
   },
   "clear-mind": {
-    title: "box breathing.",
+    title: "Box breathing.",
     subtitle: "4-minute attention reset",
     accent: colors.green,
-    description: "inhale, hold, exhale, hold. four counts each.",
+    description: "Inhale, hold, exhale, hold. Four counts each.",
     duration: 240,
   },
   "deep-relax": {
-    title: "body scan.",
+    title: "Body scan.",
     subtitle: "10-minute deep rest",
     accent: "#d6c3a5",
-    description: "let each part of the body soften without needing to sleep.",
+    description: "Let each part of the body soften without needing to sleep.",
     duration: 600,
   },
 } as const;
 
 type Exercise = keyof typeof protocols;
-type Phase = "setup" | "ready" | "active" | "paused" | "complete";
+type Phase = "setup" | "active" | "paused" | "complete";
 
 const triggerHaptic = (style: Haptics.ImpactFeedbackStyle) => {
   Haptics.impactAsync(style).catch(() => undefined);
@@ -86,11 +88,13 @@ export default function BreatheExerciseScreen({
   onBack: () => void;
 }) {
   const protocol = protocols[exercise];
+  const insets = useSafeAreaInsets();
   const [phase, setPhase] = useState<Phase>("setup");
+  const [guidance, setGuidance] = useState<BreathingGuidance>("flexible");
+  const [breathName, setBreathName] = useState("Inhale");
+  const [starting, setStarting] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [remaining, setRemaining] = useState<number>(protocol.duration);
-  const [sensorReady, setSensorReady] = useState(false);
-  const [motionDetected, setMotionDetected] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [finishing, setFinishing] = useState(false);
   const [restoring, setRestoring] = useState(true);
@@ -102,10 +106,8 @@ export default function BreatheExerciseScreen({
   const startingRef = useRef(false);
   const keysRef = useRef<string[] | null>(null);
   const lastBreathPhase = useRef<string | null>(null);
-  const sessionStart = useRef<number | null>(null);
   const circleScale = useSharedValue(1);
   const circleOpacity = useSharedValue(0.58);
-  const setupY = useSharedValue(0);
 
   useEffect(() => {
     circleOpacity.value = withRepeat(
@@ -119,7 +121,7 @@ export default function BreatheExerciseScreen({
     let mounted = true;
     void (async () => {
       const user = await ensureAnonymousUser();
-      const keys = [SESSION_KEY, DEADLINE_KEY, EXERCISE_KEY, DURATION_KEY]
+      const keys = [SESSION_KEY, DEADLINE_KEY, EXERCISE_KEY, DURATION_KEY, GUIDANCE_KEY]
         .map((key) => scopedSessionKey(key, user.uid, exercise));
       const saved = await restoreSession(keys);
       if (!mounted) return;
@@ -127,10 +129,11 @@ export default function BreatheExerciseScreen({
       setRestoring(false);
       if (!saved) return;
       if (saved.exercise !== exercise) throw new Error("Saved breathing session does not match this exercise.");
+      if (saved.duration !== protocol.duration) throw new Error("Saved breathing duration does not match this exercise.");
       setSessionId(saved.sessionId);
       setRemaining(saved.remaining);
+      setGuidance(saved.guidance);
       setPhase("active");
-      sessionStart.current = saved.startedAt;
     })().catch((restoreError) => {
       if (!mounted) return;
       setRestoring(false);
@@ -143,7 +146,7 @@ export default function BreatheExerciseScreen({
   }, [exercise]);
 
   useEffect(() => {
-    if (phase !== "active") return;
+    if (phase !== "active" && phase !== "paused") return;
     lastBreathPhase.current = null;
     const timer = setInterval(() => {
       const keys = keysRef.current;
@@ -155,7 +158,7 @@ export default function BreatheExerciseScreen({
           Math.ceil((Number(value) - Date.now()) / 1000),
         );
         setRemaining(next);
-        animateBreath(protocol.duration - next);
+        if (phase === "active") animateBreath(protocol.duration - next);
         if (next === 0) void complete();
       }).catch((readError) => setError(`Could not read the timer: ${firebaseErrorMessage(readError)}`));
     }, 250);
@@ -167,38 +170,39 @@ export default function BreatheExerciseScreen({
   }, [phase]);
 
   useEffect(() => {
-    if (phase !== "ready" && phase !== "active" && phase !== "paused") return;
+    if (guidance !== "chest" || (phase !== "active" && phase !== "paused")) return;
     let subscription: { remove: () => void } | undefined;
     let mounted = true;
     void Gyroscope.isAvailableAsync().then((available) => {
       if (!mounted) return;
       if (!available) {
-        setSensorReady(true);
+        setError("Motion sensing is unavailable. The timer continues without motion-sensitive guidance.");
+        if (phase === "paused") setPhase("active");
         return;
       }
       Gyroscope.setUpdateInterval(250);
       subscription = Gyroscope.addListener(({ x, y, z }) => {
         const movement = Math.sqrt(x * x + y * y + z * z);
         const still = movement < 0.28;
-        setSensorReady(still);
         if (phase === "active" && !still) {
-          setMotionDetected(true);
           setInterruptionCount((count) => count + 1);
           setPhase("paused");
         }
         if (phase === "paused" && still) {
-          setMotionDetected(false);
           setPhase("active");
         }
       });
     }).catch((sensorError) => {
-      if (mounted) setError(`Could not access the motion sensor: ${firebaseErrorMessage(sensorError)}`);
+      if (mounted) {
+        setError(`Could not access the motion sensor. The timer continues without motion-sensitive guidance: ${firebaseErrorMessage(sensorError)}`);
+        if (phase === "paused") setPhase("active");
+      }
     });
     return () => {
       mounted = false;
       subscription?.remove();
     };
-  }, [phase]);
+  }, [phase, guidance]);
 
   useEffect(() => {
     const handleAppState = (next: AppStateStatus) => {
@@ -214,23 +218,16 @@ export default function BreatheExerciseScreen({
     return () => subscription.remove();
   }, [phase, exercise]);
 
-  const beginSetup = () => {
-    if (restoring || restoreFailed) return;
-    setError(null);
-    setPhase("ready");
-    triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
-  };
-
   const activate = async () => {
     const keys = keysRef.current;
-    if (startingRef.current || !keys || restoreFailed) return;
-    if (!sensorReady) {
-      setError("Rest the phone flat on your chest to begin.");
-      return;
-    }
+    if (startingRef.current || !keys || restoreFailed || restoring) return;
     setError(null);
     startingRef.current = true;
+    setStarting(true);
     try {
+      if (guidance === "chest" && !(await Gyroscope.isAvailableAsync())) {
+        throw new Error("Motion sensing is unavailable. Choose flexible guidance to continue.");
+      }
       const nextSessionId = await startBreatheSession(
         exercise,
         protocol.duration,
@@ -241,9 +238,9 @@ export default function BreatheExerciseScreen({
         [keys[1], String(deadline)],
         [keys[2], exercise],
         [keys[3], String(protocol.duration)],
+        [keys[4], guidance],
       ]);
       setSessionId(nextSessionId);
-      sessionStart.current = Date.now();
       setRemaining(protocol.duration);
       setPhase("active");
       triggerHaptic(Haptics.ImpactFeedbackStyle.Heavy);
@@ -251,6 +248,7 @@ export default function BreatheExerciseScreen({
       setError(firebaseErrorMessage(activateError));
     } finally {
       startingRef.current = false;
+      setStarting(false);
     }
   };
 
@@ -258,6 +256,7 @@ export default function BreatheExerciseScreen({
     const breath = getBreathPhase(exercise, elapsed);
     if (lastBreathPhase.current === breath.key) return;
     lastBreathPhase.current = breath.key;
+    setBreathName(capitalizeSentenceStarts(breath.name));
     circleScale.value = withTiming(breath.scale, {
       duration: breath.remainingSeconds * 1000,
       easing: Easing.inOut(Easing.ease),
@@ -320,173 +319,102 @@ export default function BreatheExerciseScreen({
     }
   };
 
-  const exitExercise = async () => {
-    if (phase === "complete" || restoreFailed) {
-      onBack();
-      return;
-    }
-    await leave();
-  };
-
   const circleStyle = useAnimatedStyle(() => ({
     transform: [{ scale: circleScale.value }],
     opacity: circleOpacity.value,
-  }));
-  const setupStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: setupY.value }],
   }));
 
   return (
     <Animated.View
       entering={FadeIn.duration(500)}
       exiting={FadeOut.duration(300)}
-      style={[styles.screen, phase === "complete" && styles.completeScreen]}
+      style={styles.screen}
     >
-      <View style={styles.content}>
-        <GestureDetector
-          gesture={Gesture.Pan().onEnd((event) => {
-            if (event.translationX > 80) runOnJS(exitExercise)();
-          })}
-        >
-          <Text style={[styles.nav, phase === "complete" && styles.darkText]}>
-            ← state ledger.
-          </Text>
-        </GestureDetector>
+      <ScrollView contentContainerStyle={[styles.content, { paddingTop: insets.top + 52, paddingBottom: insets.bottom + 40 }]} showsVerticalScrollIndicator={false}>
+        {phase === "setup" && <SwipeAction label="Back to breathe" disabled={starting} onActivate={onBack} />}
         {phase === "setup" && (
           <>
+            <Text style={styles.eyebrow}>BREATHE / YOUR PRACTICE</Text>
             <Text style={styles.title}>{protocol.title}</Text>
             <Text style={styles.subtitle}>{protocol.subtitle}</Text>
-            <Text style={styles.mandate}>{protocol.description}</Text>
-          </>
-        )}
-        {phase === "ready" && (
-          <>
-            <Text style={styles.eyebrow}>place phone on chest</Text>
-            <Text style={styles.title}>close your eyes.</Text>
-            <Text style={styles.subtitle}>
-              Follow the tactile rhythms. Once the phone is still, swipe up to
-              begin the session.
-            </Text>
+            <View style={styles.infoCard}>
+              <Text style={styles.cardLabel}>HOW IT WORKS</Text>
+              <Text style={styles.cardText}>{protocol.description}</Text>
+              <Text style={styles.cardNote}>Breathe gently and at a comfortable pace. Stop if you feel uncomfortable.</Text>
+            </View>
+            <Text style={styles.sectionLabel}>CHOOSE YOUR GUIDANCE</Text>
+            <View style={styles.choiceCard}>
+              <Text style={styles.choiceTitle}>Flexible guidance</Text>
+              <Text style={styles.choiceText}>Hold or rest your phone comfortably. Follow the screen and gentle haptics.</Text>
+              <Text style={styles.selected}>{guidance === "flexible" ? "SELECTED" : "AVAILABLE"}</Text>
+              {guidance !== "flexible" && <SwipeAction label="Choose flexible guidance" disabled={starting} onActivate={() => { setGuidance("flexible"); setError(null); }} />}
+            </View>
+            <View style={styles.choiceCard}>
+              <Text style={styles.choiceTitle}>Chest-based guidance</Text>
+              <Text style={styles.choiceText}>Rest your phone on your chest. Movement pauses the cues; the timer keeps running.</Text>
+              <Text style={styles.selected}>{guidance === "chest" ? "SELECTED" : "AVAILABLE"}</Text>
+              {guidance !== "chest" && <SwipeAction label="Choose chest-based guidance" disabled={starting} onActivate={() => { setGuidance("chest"); setError(null); }} />}
+            </View>
+            {restoring ? <Text style={styles.cardNote}>Checking your saved session...</Text> : !restoreFailed && (
+              <SwipeAction label={starting ? "Starting session..." : "Start breathing session"} disabled={starting} onActivate={() => void activate()} />
+            )}
           </>
         )}
         {phase === "active" && (
           <>
-            <Text style={styles.eyebrow}>breathe active</Text>
-            <Text style={styles.title}>stay with the rhythm.</Text>
-            <Text style={styles.timer}>{formatTime(remaining)}</Text>
+            <Text style={styles.eyebrow}>BREATHE / SESSION IN PROGRESS</Text>
+            <Text style={styles.title}>Stay with the rhythm.</Text>
+            <Text style={styles.subtitle}>Follow along gently. You can take a break whenever you need.</Text>
           </>
         )}
         {phase === "paused" && (
           <>
-            <Text style={styles.eyebrow}>position lost</Text>
-            <Text style={styles.title}>replace on chest.</Text>
-            <Text style={styles.subtitle}>
-              The haptics are paused. Rest the phone to resume.
-            </Text>
+            <Text style={styles.eyebrow}>BREATHE / GUIDANCE PAUSED</Text>
+            <Text style={styles.title}>Find your position.</Text>
+            <Text style={styles.subtitle}>Rest your phone to resume the cues. Your session timer is still running.</Text>
           </>
         )}
         {phase === "complete" && (
           <>
-            <Text style={[styles.eyebrow, styles.darkText]}>restored</Text>
-            <Text style={[styles.title, styles.darkText]}>you returned.</Text>
-            <Text style={[styles.subtitle, styles.darkText]}>
-              Your {protocol.subtitle.toLowerCase()} is complete.
-            </Text>
+            <Text style={styles.eyebrow}>BREATHE / SESSION COMPLETE</Text>
+            <Text style={styles.title}>Well done.</Text>
+            <Text style={styles.subtitle}>You made time for yourself. Your session has been saved.</Text>
           </>
         )}
-        <View style={styles.circleArea}>
-          <Animated.View
-            style={[
-              styles.circleGlow,
-              { backgroundColor: protocol.accent },
-              circleStyle,
-            ]}
-          />
-          <View style={[styles.circle, { borderColor: protocol.accent }]}>
-            <Text
-              style={[
-                styles.circleText,
-                phase === "complete" && styles.darkText,
-              ]}
-            >
-              {phase === "complete"
-                ? "CALM"
-                : phase === "active"
-                  ? "breathe"
-                  : phase === "ready"
-                    ? sensorReady
-                      ? "ready"
-                      : "rest phone"
-                    : "begin"}
-            </Text>
+        {(phase === "active" || phase === "paused") && (
+          <View style={styles.sessionCard}>
+            <Text style={styles.cardLabel}>TIME REMAINING</Text>
+            <Text style={styles.timer}>{formatTime(remaining)}</Text>
+            <View style={styles.circleArea}>
+              <Animated.View style={[styles.circleGlow, { backgroundColor: protocol.accent }, circleStyle]} />
+              <View style={[styles.circle, { borderColor: protocol.accent }]}>
+                <Text style={styles.circleText}>{phase === "paused" ? "Rest phone" : breathName}</Text>
+              </View>
+            </View>
+            <Text style={styles.cardNote}>{guidance === "chest" ? "Chest-based guidance" : "Flexible guidance"}</Text>
           </View>
-        </View>
-        {phase === "setup" && !restoring && !restoreFailed && !finishing && (
-          <GestureDetector
-            gesture={Gesture.Pan()
-              .onUpdate((event) => {
-                setupY.value = Math.min(0, Math.max(-100, event.translationY));
-              })
-              .onEnd((event) => {
-                if (event.translationY < -60) {
-                  setupY.value = withSpring(-100);
-                  runOnJS(beginSetup)();
-                } else setupY.value = withSpring(0);
-              })}
-          >
-            <Animated.Text
-              style={[
-                styles.beginAction,
-                { color: protocol.accent },
-                setupStyle,
-              ]}
-            >
-              drag up to setup ↑
-            </Animated.Text>
-          </GestureDetector>
         )}
+        {finishing && phase !== "complete" && <Text style={styles.cardNote}>Saving your session...</Text>}
         {completionFailed && (
-          <SwipeAction label="retry saving completed session" onActivate={() => void complete(true)} disabled={finishing} />
+          <SwipeAction label="Retry saving completed session" onActivate={() => void complete(true)} disabled={finishing} />
         )}
-        {(phase === "active" || phase === "paused") && !completionFailed && (
-          <SwipeAction label="leave exercise" onActivate={() => void leave()} />
+        {(phase === "active" || phase === "paused") && (
+          <SwipeAction label={completionFailed ? "Return and retry later" : "Leave exercise"} disabled={finishing} onActivate={() => void leave()} />
         )}
         {phase === "complete" && (
-          <SwipeAction label="return to breathe state" onActivate={onBack} tone="light" />
+          <SwipeAction label="Return to breathe state" onActivate={onBack} />
         )}
-        {error && <Text style={styles.error}>{error}</Text>}
-      </View>
-      {phase === "ready" && (
-        <GestureDetector
-          gesture={Gesture.Pan()
-            .activeOffsetY([-10, 10])
-            .onEnd((event) => {
-              if (event.translationY < -60) runOnJS(activate)();
-            })}
-        >
-          <View style={styles.readyGestureOverlay} />
-        </GestureDetector>
-      )}
+        {error && <Text accessibilityLiveRegion="polite" style={styles.error}>{error}</Text>}
+      </ScrollView>
     </Animated.View>
   );
 }
 
 async function restoreSession(keys: string[]) {
-  const [sessionId, deadline, exercise, duration] = await AsyncStorage.multiGet(
+  const values = await AsyncStorage.multiGet(
     keys,
   ).then((entries) => entries.map(([, value]) => value));
-  if ([sessionId, deadline, exercise, duration].every((value) => value === null)) return null;
-  if (!sessionId || !deadline || !exercise || !duration) throw new Error("Saved breathing session is incomplete.");
-  if (!Number.isFinite(Number(deadline)) || !duration || !Number.isFinite(Number(duration)) || Number(duration) <= 0) {
-    throw new Error("Saved breathing timer is invalid.");
-  }
-  return {
-    sessionId,
-    exercise,
-    duration: Number(duration) || 180,
-    startedAt: Number(deadline) - (Number(duration) || 180) * 1000,
-    remaining: Math.max(0, Math.ceil((Number(deadline) - Date.now()) / 1000)),
-  };
+  return parseBreathingSession(values, Date.now());
 }
 
 function clearSessionStorage(keys: string[]) {
@@ -497,51 +425,45 @@ function formatTime(seconds: number) {
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.bgDark, overflow: "hidden" },
-  completeScreen: { backgroundColor: colors.bgLight },
-  content: { flex: 1, padding: 28, paddingTop: 54, paddingBottom: 42 },
-  nav: {
-    color: colors.orange,
-    fontSize: 14,
-    fontWeight: "700",
-    marginTop: 34,
-    marginBottom: 54,
-  },
-  darkText: { color: colors.textDark },
+  screen: { flex: 1, backgroundColor: "#100e0c" },
+  content: { flexGrow: 1, paddingHorizontal: 28 },
   eyebrow: {
-    color: colors.orange,
+    color: "#ffc18f",
     fontSize: 11,
     fontWeight: "800",
     letterSpacing: 2.2,
     textTransform: "uppercase",
-    marginBottom: 18,
+    marginTop: 24,
+    marginBottom: 14,
   },
   title: {
     color: colors.white,
-    fontSize: 48,
-    lineHeight: 50,
+    fontSize: 42,
+    lineHeight: 46,
     fontWeight: "900",
     letterSpacing: -2,
   },
   subtitle: {
-    color: colors.white50,
+    color: "#e5d3c7",
     fontSize: 16,
     lineHeight: 24,
-    marginTop: 18,
+    marginTop: 12,
     maxWidth: 330,
   },
-  mandate: {
-    color: colors.white,
-    fontSize: 16,
-    lineHeight: 24,
-    marginTop: 38,
-    maxWidth: 300,
-  },
+  infoCard: { backgroundColor: "#3d241b", borderColor: "#89573e", borderWidth: 1, borderRadius: 22, padding: 20, marginTop: 26 },
+  cardLabel: { color: "#ffc18f", fontSize: 10, fontWeight: "800", letterSpacing: 1.5 },
+  cardText: { color: "#fff", fontSize: 16, lineHeight: 24, marginTop: 10 },
+  cardNote: { color: "#e1cfc3", fontSize: 13, lineHeight: 20, marginTop: 12 },
+  sectionLabel: { color: "#ffc18f", fontSize: 10, fontWeight: "800", letterSpacing: 1.5, marginTop: 28, marginBottom: 12 },
+  choiceCard: { backgroundColor: "#291a15", borderColor: "#80503b", borderWidth: 1, borderRadius: 20, padding: 18, marginBottom: 10 },
+  choiceTitle: { color: "#fff", fontSize: 19, fontWeight: "800" },
+  choiceText: { color: "#ead9cf", fontSize: 14, lineHeight: 21, marginTop: 8 },
+  selected: { color: "#ffc18f", fontSize: 10, fontWeight: "800", letterSpacing: 1.2, marginTop: 14 },
+  sessionCard: { backgroundColor: "#291a15", borderColor: "#80503b", borderWidth: 1, borderRadius: 24, padding: 22, marginTop: 28, alignItems: "center" },
   circleArea: {
-    flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    minHeight: 250,
+    height: 260,
   },
   circleGlow: {
     position: "absolute",
@@ -565,17 +487,7 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     letterSpacing: 1.4,
     textTransform: "uppercase",
-  },
-  beginAction: {
-    fontSize: 15,
-    fontWeight: "800",
-    letterSpacing: 1.2,
-    textTransform: "uppercase",
-    paddingVertical: 20,
-  },
-  readyGestureOverlay: {
-    ...StyleSheet.absoluteFill,
-    zIndex: 20,
+    textAlign: "center",
   },
   timer: {
     color: colors.white,
@@ -583,14 +495,6 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     letterSpacing: -3,
     marginTop: 12,
-  },
-  leave: {
-    color: colors.rose,
-    fontSize: 13,
-    fontWeight: "800",
-    letterSpacing: 1.2,
-    textTransform: "uppercase",
-    marginTop: 22,
   },
   error: { color: colors.rose, fontSize: 12, lineHeight: 18, marginTop: 16 },
 });

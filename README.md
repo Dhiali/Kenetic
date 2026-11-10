@@ -31,7 +31,7 @@ flowchart LR
   Dashboard --> Profile[Profile]
   Outdoors --> Radar[Bio Radar]
   Outdoors --> Quizzes[Curiosity Quizzes]
-  Outdoors --> Spots[Spot Finder]
+  Outdoors --> Spots[Spot Keeper]
   Outdoors --> Challenges[Daily Challenges]
 ```
 
@@ -43,13 +43,23 @@ timer when the user returns to Kenetic; there is no music-selection deadline.
 The timer uses a saved deadline so it can resume after the app is closed.
 Kenetic does not control music playback or lock other apps. Alien Mode sends
 the task to Gemini with the user's consent and presents suggested small steps.
-Starting a focus session stores the original task and first step in Firestore.
+The user chooses 1–10 minutes per step and drags up to start the timer. They
+can finish early or wait for the timer, then review and start the next suggested
+step. Starting each focus session stores the original task and current step in
+Firestore; the suggested plan is also saved locally per account for recovery.
+Focus activity shows completed sessions and time for the last seven local
+calendar days (including today), all-time totals, and a breakdown by mode.
 
 ### Breathe
 
-Breathe provides guided exercises such as calm down, recenter, clear mind,
-and deep relax. Exercise launches and session completion data are persisted so
-the dashboard can display restoration activity.
+Breathe presents calm down, recenter, clear mind, and deep relax as swipeable
+exercise cards. Exercise launches and session completion data are persisted so
+the dashboard can show completed sessions, their duration, and the completion
+rate for sessions started during the current week. The rate is not a measure of
+recovery. Before an exercise, users can choose flexible on-screen and haptic
+guidance or chest-based motion-sensitive guidance. In chest mode, movement pauses
+the cues but the session timer continues; a still phone resumes the cues. The
+choice is restored with an active session.
 
 ### Outdoors
 
@@ -58,12 +68,17 @@ learning:
 
 - **Bio Radar:** sends a photo to Gemini after
   consent. The result is an uncertain estimate, not a safety identification.
-- **Curiosity Quizzes:** offers curated general-nature questions each UTC day,
-  alongside eligible older discoveries. Questions come from a local bank rather
-  than AI. New AI discoveries are not treated as verified quiz facts.
-- **Spot Finder:** saves named places; optional nearby park and hiking-area
-  search uses Google Places and requests location permission.
-- **Daily Challenges:** offers a daily grounding activity with saved progress.
+- **Curiosity Quizzes:** offers daily curated general-nature questions alongside
+  recall questions based on saved Bio Radar descriptions. Those descriptions
+  remain uncertain AI estimates, not verified facts or safety advice. Quiz
+  questions do not send discoveries back to AI.
+- **Spot Keeper:** lets users manually save, rename, and delete places.
+  Nearby search is not available.
+- **Daily Challenges:** offers a grounding activity for each rolling 24-hour
+  window beginning when the user first opens it. A new activity appears after
+  each window whether or not the previous one was completed; progress is saved
+  per account. A live countdown shows when the next challenge arrives, and
+  completed challenges appear in a saved history.
 
 When saved, Bio Radar records the scan source, visual mode, AI result,
 and session lifecycle; it does not save the photo to Firestore.
@@ -176,7 +191,6 @@ users/{uid}/
   `expo-notifications` for native capabilities
 - `expo-blur` and `expo-linear-gradient` for visual depth
 - Optional Cloudinary profile-photo uploads
-- Optional Google Places integration for Spot Finder work
 
 ## Requirements
 
@@ -393,11 +407,11 @@ option rather than silently skipping the step.
 - Hold the Bio Radar reticle for two seconds to begin a scan.
 - Haptic feedback marks important starts, drops, successes, warnings, and
   failures.
-- In Daily Challenges, drag to start, complete, reopen, or clear today's
-  progress. In Spot Finder, save a named place and drag to edit or delete it.
-- Nearby search is optional: it requests location permission and sends
-  coordinates to Google Places. It requires separate API configuration and may
-  incur charges. Manually saved places do not require Google Places.
+- In Daily Challenges, drag to start or complete the current challenge, or
+  clear its progress before completion. In Spot Keeper, save a named place and
+  drag to edit or delete it.
+- Spot Keeper uses manually saved places and does not request location or use
+  Google Places.
 - Reanimated tweening and spring motion provide progress, snap, reveal, and
   screen-transition feedback.
 
@@ -407,8 +421,7 @@ option rather than silently skipping the step.
 2. Read and agree to the AI privacy notice, then grant camera permission.
 3. Hold the reticle for two seconds to send a photo.
 4. Review the AI estimate and uncertainty. Do not use it to make safety decisions.
-5. Drag `discovered` onto its target to save the result. AI discoveries are not
-   added to Curiosity Quizzes.
+5. Drag `save discovery` right to save the result for later recall in quizzes.
 
 The scan is stored in `users/{uid}/scanHistory`. A matching outdoors session is
 started before processing and completed when the discovery is saved, or marked
@@ -417,19 +430,15 @@ abandoned if the user exits early.
 ### Curiosity Quizzes
 
 1. Open **Curiosity Quizzes** from Outdoors.
-2. The lobby loads scans marked for daily quizzes from Firestore.
-3. Drag `drag to recall` down into the sand pool.
-4. Read the species-specific question and drag one answer upward into the
-   glowing `drag truth here` circle.
-5. The photo sharpens and a green or orange feedback wave indicates the result.
-6. Read the verified ecological fact.
-7. Drag `retained` onto the `RETAINED` target to save the result and move to
-   the next queued discovery.
+2. The lobby loads saved Bio Radar descriptions and daily general questions.
+3. Drag `begin question` right, then drag an answer right to select it.
+4. Review the answer and drag `save answer and continue` right to record it.
+   Bio Radar answers repeat the saved AI estimate; they do not verify it.
 
-The quiz queue is deterministic and remote-backed. It is built from recent
-scan records, deduplicated by species for the active queue, and excludes scan
-records already answered by their scan ID. A failed remote load has a retry
-path instead of being presented as an empty queue.
+The queue uses up to five recent unique discoveries plus curated questions,
+and excludes questions already answered that UTC day. Saved discoveries,
+including earlier Bio Radar results, can be revisited on later days. A failed
+remote load or save has a retry path instead of appearing successful.
 
 ### Dashboard and profile
 
@@ -530,8 +539,8 @@ are not fully represented in a web browser.
   species identification is an uncertain estimate and not safety advice.
 - Curiosity Quiz questions come from a maintained local question bank; they
   are not generated dynamically by an AI model.
-- Nearby search requires Google Places configuration and may incur charges;
-  adding and managing named places manually does not require Google Places.
+- Spot Keeper currently supports manually saved places only; nearby search is
+  unavailable.
 - Bio Radar photos are not saved to Firestore. Live Firebase Storage requires
   billing-enabled configuration and has not been validated in this setup;
   optional profile-photo uploads require separate Cloudinary configuration.
