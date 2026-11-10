@@ -20,6 +20,14 @@
   - [Spot Keeper](#spot-keeper)
   - [Daily Challenges](#daily-challenges)
   - [Activity and Profile](#activity-and-profile)
+- [Development Process](#development-process)
+  - [Theme and Creative Direction](#theme-and-creative-direction)
+  - [Interaction and Experience Decisions](#interaction-and-experience-decisions)
+  - [Technical Decisions](#technical-decisions)
+  - [User Flow](#user-flow)
+  - [System Architecture](#system-architecture)
+  - [Data Model](#data-model)
+  - [Iteration and Verification](#iteration-and-verification)
 - [Demo](#demo)
 - [Product Overview](#product-overview)
   - [Focus](#focus)
@@ -338,6 +346,180 @@ their account and review or withdraw their AI agreement.
 
 **Mockup screenshot:** Capture **Your focus activity** on the Focus dashboard
 with its recent activity and mode breakdown visible.
+
+## Development Process
+
+Kenetic was developed around the idea that a small physical action can help
+someone move from intention to activity. The app brings focused work,
+breathing, and outdoor exploration together without treating wellbeing as a
+passive content feed.
+
+### Theme and Creative Direction
+
+The interface uses a dark backdrop, bold type, soft gradients, and animated
+shapes to create a calm but active visual identity. Each state has its own
+accent: rose for **Focus**, warm orange for **Breathe**, and green for
+**Outdoors**. These colours help distinguish the experiences while the shared
+card layouts and navigation keep the app recognisable as one product.
+
+The design emphasises a single next action: choosing a state, beginning a
+short focus step, following a breathing cue, or looking more closely at
+something outside. Copy and activity summaries provide context without
+claiming to diagnose or measure a user's wellbeing.
+
+### Interaction and Experience Decisions
+
+- **Movement as interaction:** Swipes, drags, holds, animation, and haptic
+  feedback make navigation and confirmation feel like deliberate small actions.
+  Some gestures also expose screen-reader actions; full device accessibility
+  testing remains outstanding.
+- **Feature-first dashboards:** Focus, Breathe, and Outdoors present their
+  activities before the user's saved activity summaries, helping users find
+  what they can do next.
+- **Small, manageable steps:** Alien Mode presents suggested steps with
+  selectable 1–10 minute timers. Breathing offers a choice between flexible
+  and chest-based guidance.
+- **Learning through discovery:** Bio Radar results can be saved and revisited
+  in Curiosity Quizzes. Spot Keeper uses manually saved places rather than
+  implying that a nearby-search service is available.
+- **A continuing invitation:** Daily Challenges use a rolling 24-hour window;
+  a new activity appears whether or not the previous one was completed.
+
+### Technical Decisions
+
+- **Mobile frontend:** React Native and Expo support the iOS and Android
+  codebase. Gesture Handler, Reanimated, and Expo haptics support the
+  movement-led interface.
+- **Account-scoped data:** Firebase Authentication identifies users and
+  Firestore stores their profiles and activity. Owner-scoped security rules
+  protect user data; Firebase bootstrap helpers centralise access to it.
+- **Recoverable sessions:** Focus and breathing timers use locally saved,
+  account-scoped session information so they can be restored. Completion is
+  saved remotely, with an explicit retry path if saving fails.
+- **Consent-led AI:** Alien Mode and Bio Radar require an account-level AI
+  agreement and an explicit action before sending a task or photo to the
+  hosted Cloudflare Worker. Gemini credentials stay on the Worker, not in the
+  mobile app. Bio Radar results are presented as uncertain estimates.
+- **Cost-aware services:** The core setup uses Firebase Authentication and
+  Firestore and a separately configured AI Worker, subject to provider free
+  quotas and eligibility. Optional Firebase Functions and Storage have
+  different billing requirements; see [Installation](#installation).
+
+### User Flow
+
+This diagram shows the main routes. Returning users can resume their saved
+onboarding state or reach the dashboard after signing in.
+
+```mermaid
+flowchart TD
+  Start[Open Kenetic] --> Account[Where to? Sign in or create account]
+  Account --> Intention[Choose an intention]
+  Intention --> Onboarding[Complete onboarding]
+  Onboarding --> Dashboard[Choose a state]
+  Dashboard --> Focus[Focus]
+  Dashboard --> Breathe[Breathe]
+  Dashboard --> Outdoors[Outdoors]
+  Dashboard --> Profile[Profile]
+  Focus --> Music[Get Shit Done: music and focus timer]
+  Focus --> Alien[Alien Mode: suggested focus steps]
+  Breathe --> Guidance[Choose guidance and complete a practice]
+  Outdoors --> Radar[Bio Radar: photograph and save a discovery]
+  Outdoors --> Quiz[Curiosity Quizzes]
+  Outdoors --> Spots[Spot Keeper: save a place]
+  Outdoors --> Challenge[Daily Challenges]
+  Radar -. Saved descriptions .-> Quiz
+  Profile --> Account
+```
+
+### System Architecture
+
+The app uses Firebase for account and activity data. For an AI request, the
+app checks the user's agreement, then sends the request to the Worker, which
+verifies the Firebase token and calls Gemini. The Worker does not receive a
+Gemini key from the app.
+
+```mermaid
+flowchart LR
+  User[User] --> App[Expo / React Native app]
+  App --> Local[Local session storage]
+  App --> Auth[Firebase Authentication]
+  App --> Firestore[Cloud Firestore]
+  App -->|Consented task or photo and Firebase token| Worker[Cloudflare AI Worker]
+  Worker -->|Server-side API key| Gemini[Gemini API]
+  Gemini --> Worker
+  Worker --> App
+  Firestore -. Owner access enforced by .-> Rules[Firestore security rules]
+```
+
+### Data Model
+
+The following is a **conceptual ERD** of the main user-owned Firestore records,
+not a relational database schema. Records are stored in subcollections under
+`users/{uid}`; the connecting lines indicate ownership, not enforced SQL
+foreign keys. Additional collections record intentions, feature launches,
+dashboard selections, metrics, and device-related events.
+
+```mermaid
+erDiagram
+  USER ||--o{ SESSION : owns
+  USER ||--o{ SCAN_HISTORY : owns
+  USER ||--o{ QUIZ_HISTORY : owns
+  USER ||--o{ SAVED_PLACE : owns
+  USER ||--o{ CHALLENGE_PROGRESS : owns
+
+  USER {
+    string uid
+    string displayName
+    boolean onboardingCompleted
+    string aiConsentVersion
+  }
+  SESSION {
+    string type
+    string status
+    timestamp startedAt
+    timestamp completedAt
+    number durationSeconds
+    map metadata
+  }
+  SCAN_HISTORY {
+    string scanId
+    string title
+    string summary
+    timestamp capturedAt
+  }
+  QUIZ_HISTORY {
+    string questionId
+    string prompt
+    boolean correct
+    timestamp answeredAt
+  }
+  SAVED_PLACE {
+    string placeId
+    string name
+    string address
+    timestamp savedAt
+  }
+  CHALLENGE_PROGRESS {
+    string challengeId
+    string status
+    timestamp completedAt
+    map metadata
+  }
+```
+
+Some fields are optional. A saved discovery's description can be used to
+create a quiz question; quiz history stores the question ID and result rather
+than an enforced relationship to the scan. The challenge collection also
+stores the per-account rolling schedule anchor.
+
+### Iteration and Verification
+
+The interface and flows were refined through an iPhone walkthrough, including
+changes to focus sessions, Bio Radar, quizzes, saved places, challenges,
+breathing, and logout. Automated checks cover selected timing, persistence,
+authentication, and UI conventions; iOS bundling was also checked. Android
+and screen-reader device testing were not included in that walkthrough, so the
+project should not be presented as fully verified on those platforms.
 
 ## Demo
 
