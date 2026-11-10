@@ -2,6 +2,31 @@
 
 ![Kenetic mobile wellbeing app header](assets/images/keneticHeader.png)
 
+## Table of Contents
+
+- [About Kenetic](#about-kenetic)
+- [Tech Stack](#tech-stack)
+- [Demo](#demo)
+- [Product Overview](#product-overview)
+  - [Focus](#focus)
+  - [Breathe](#breathe)
+  - [Outdoors](#outdoors)
+- [Architecture](#architecture)
+  - [AI setup and restrictions](#ai-setup-and-restrictions)
+- [Technology](#technology)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [How To Use The App](#how-to-use-the-app)
+- [Environment Variables](#environment-variables)
+- [Project Structure](#project-structure)
+- [Verification](#verification)
+- [Known Product Boundaries](#known-product-boundaries)
+- [License](#license)
+- [Acknowledgments](#acknowledgments)
+- [Author](#author)
+
+## About Kenetic
+
 kenetic is a mobile wellbeing and environmental-awareness app built around
 small physical actions. It helps users move between focused work, breathing
 and restoration practices, and attentive outdoor exploration without turning
@@ -10,6 +35,17 @@ those activities into a passive content feed.
 The app is a mobile-only React Native / Expo application for Android and iOS.
 Firebase provides authentication and remote persistence. Alien Mode and
 Bio Radar require the separately configured hosted AI service described below.
+
+## Tech Stack
+
+| Technology | Role |
+| --- | --- |
+| ![React](https://img.shields.io/badge/React-20232A?logo=react&logoColor=61DAFB) **React Native** | Cross-platform mobile interface |
+| ![Expo](https://img.shields.io/badge/Expo-1C1E24?logo=expo&logoColor=white) **Expo** | Mobile development and native capabilities |
+| ![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white) **TypeScript** | Application and backend code |
+| ![Firebase](https://img.shields.io/badge/Firebase-DD2C00?logo=firebase&logoColor=white) **Firebase** | Authentication and Cloud Firestore persistence |
+| ![Cloudflare](https://img.shields.io/badge/Cloudflare-F38020?logo=cloudflare&logoColor=white) **Cloudflare Workers** | Hosted AI service |
+| ![Google Gemini](https://img.shields.io/badge/Google%20Gemini-886FBF?logo=googlegemini&logoColor=white) **Gemini** | AI-assisted task breakdown and nature discovery |
 
 ## Demo
 
