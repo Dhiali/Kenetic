@@ -6,6 +6,9 @@
 
 - [About Kenetic](#about-kenetic)
 - [Tech Stack](#tech-stack)
+- [Installation](#installation)
+  - [Prerequisites](#prerequisites)
+  - [How to Install](#how-to-install)
 - [Demo](#demo)
 - [Product Overview](#product-overview)
   - [Focus](#focus)
@@ -14,8 +17,6 @@
 - [Architecture](#architecture)
   - [AI setup and restrictions](#ai-setup-and-restrictions)
 - [Technology](#technology)
-- [Requirements](#requirements)
-- [Installation](#installation)
 - [How To Use The App](#how-to-use-the-app)
 - [Environment Variables](#environment-variables)
 - [Project Structure](#project-structure)
@@ -46,6 +47,195 @@ Bio Radar require the separately configured hosted AI service described below.
 | ![Firebase](https://img.shields.io/badge/Firebase-DD2C00?logo=firebase&logoColor=white) **Firebase** | Authentication and Cloud Firestore persistence |
 | ![Cloudflare](https://img.shields.io/badge/Cloudflare-F38020?logo=cloudflare&logoColor=white) **Cloudflare Workers** | Hosted AI service |
 | ![Google Gemini](https://img.shields.io/badge/Google%20Gemini-886FBF?logo=googlegemini&logoColor=white) **Gemini** | AI-assisted task breakdown and nature discovery |
+
+## Installation
+
+These steps set up the mobile frontend, Firebase backend, and hosted AI service
+for a development preview. They do not publish an app to an app store. Firebase
+Authentication and Firestore can be used on the Spark plan within their free
+quotas; Cloudflare and Gemini also have usage limits. Check current pricing and
+account settings before deploying: free-tier limits do not guarantee zero
+charges if billing is enabled.
+
+### Prerequisites
+
+**Software and device**
+
+- [Git](https://git-scm.com/downloads) to clone the repository.
+- [Node.js and npm](https://nodejs.org/en/download): Node.js 22.13 or newer in
+  the 22.x line, 24.3 or newer in the 24.x line, 26.x, or 27 or newer. npm is
+  included with Node.js. Check both with `node --version` and `npm --version`.
+- A phone with [Expo Go](https://expo.dev/go) compatible with this project's
+  Expo SDK, or an Android emulator / iOS simulator. See
+  [Expo's environment setup guide](https://docs.expo.dev/get-started/set-up-your-environment/).
+  For a physical iPhone, sign in to the same Expo account on Expo Go and the
+  CLI; see [Expo's sign-in guide](https://docs.expo.dev/troubleshooting/expo-go-sign-in-required/).
+- An [Expo account](https://expo.dev/signup) for the iPhone development
+  preview. The computer and phone should be on the same network for LAN use.
+- Java is only required for the optional
+  [Firebase emulator and rules tests](https://firebase.google.com/docs/emulator-suite/install_and_configure).
+
+**Accounts and keys**
+
+- A [Firebase project](https://console.firebase.google.com/) with
+  Authentication and Cloud Firestore. Register a **Web app** to obtain the
+  Firebase JavaScript configuration; this does not make Kenetic a web app.
+  Enable **Anonymous** and **Email/Password** sign-in.
+- For Alien Mode and Bio Radar, a [Cloudflare account](https://dash.cloudflare.com/sign-up),
+  [Workers access](https://developers.cloudflare.com/workers/get-started/guide/),
+  and a [Gemini API key](https://aistudio.google.com/apikey). Confirm that the
+  configured Gemini model and unpaid access are available in your region.
+  The AI service is optional for the rest of the app, but those two features
+  cannot work without it.
+- The project uses the Firebase CLI installed by `npm ci`; Wrangler is run
+  through `npx` for AI deployment. React Native, Expo, TypeScript, and other
+  app packages are installed from the repository's lockfile, not individually.
+- Optional profile-photo uploads require a [Cloudinary account](https://cloudinary.com/)
+  and an unsigned upload preset. Google Places and Google/Apple sign-in keys
+  are not needed for the current manual Spot Keeper and email/password flows.
+  Firebase Storage and deployed Firebase Functions require a billing-enabled
+  plan; they are not required for the core free-tier setup.
+
+### How to Install
+
+Run the following commands in a terminal. Commands start from the project root
+unless a step changes directories.
+
+**1. Clone the project and install frontend dependencies**
+
+```bash
+git clone https://github.com/Dhiali/Kenetic.git
+cd Kenetic
+npm ci
+```
+
+`npm ci` installs the locked versions. If dependencies are deliberately changed,
+update the manifest and lockfile together; do not upgrade Expo or other core
+packages merely to run the existing project.
+
+**2. Configure Firebase and its security rules**
+
+1. In the [Firebase Console](https://console.firebase.google.com/), create a
+   project, register a Web app, and copy its configuration. Enable Anonymous
+   and Email/Password under Authentication, then create a Cloud Firestore
+   database. See [Firebase setup](https://firebase.google.com/docs/web/setup)
+   and [Firestore setup](https://firebase.google.com/docs/firestore/quickstart).
+2. Copy the environment template:
+
+   ```powershell
+   Copy-Item .env.example .env.local
+   ```
+
+   On macOS/Linux, run `cp .env.example .env.local` instead. Do not overwrite
+   an existing `.env.local` containing configuration you want to keep.
+3. Fill in these values in `.env.local` from the Firebase Web app settings:
+
+   ```dotenv
+   EXPO_PUBLIC_FIREBASE_API_KEY=your-firebase-api-key
+   EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN=your-project.firebaseapp.com
+   EXPO_PUBLIC_FIREBASE_PROJECT_ID=your-project-id
+   EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=your-sender-id
+   EXPO_PUBLIC_FIREBASE_APP_ID=your-app-id
+   ```
+
+4. Sign in to Firebase and deploy **only** the Firestore rules to the project
+   you created. Replace the placeholder with your actual project ID:
+
+   ```bash
+   npx firebase login
+   npx firebase deploy --only firestore:rules --project YOUR_FIREBASE_PROJECT_ID
+   ```
+
+   This changes the rules on the selected live Firebase project. Confirm the
+   project ID first; it does not deploy Functions or Storage.
+
+**3. Set up the AI backend for Alien Mode and Bio Radar**
+
+1. In [Google AI Studio](https://aistudio.google.com/apikey), create a Gemini
+   API key. Keep it private.
+2. Open `ai-worker/wrangler.toml`. Set `FIREBASE_PROJECT_ID` to the same
+   Firebase project ID used in `.env.local`; the checked-in value is an example,
+   not your project. Set `ALLOWED_COUNTRIES` to comma-separated ISO country codes
+   where unpaid Gemini use is permitted, and choose a Worker name appropriate
+   for your Cloudflare account. Preserve the Durable Object binding and migration.
+3. From the project root, sign in to Cloudflare, save the key as a Worker
+   secret, and deploy:
+
+   ```bash
+   cd ai-worker
+   npx wrangler login
+   npx wrangler secret put GEMINI_API_KEY
+   npx wrangler deploy
+   cd ..
+   ```
+
+   Enter the Gemini key when prompted; never put it in `.env.local`, app code,
+   or an `EXPO_PUBLIC_` variable. Wrangler prints the deployed Worker's HTTPS
+   address. See [Wrangler documentation](https://developers.cloudflare.com/workers/wrangler/).
+4. Add the Worker origin to `.env.local`:
+
+   ```dotenv
+   EXPO_PUBLIC_AI_SERVICE_URL=https://your-worker.example.workers.dev
+   ```
+
+   Review [AI setup and restrictions](#ai-setup-and-restrictions), including
+   country restrictions, consent, and quotas, before using or sharing the app.
+
+**4. Start the frontend**
+
+```bash
+npx expo login
+npx expo start --lan
+```
+
+Sign in with the Expo account used on your phone. Open Expo Go and scan the QR
+code. On iPhone, use the Camera app to open the
+link; on Android, use the Expo Go scanner. If the port is occupied, accept
+Expo's offered alternative. After changing `.env.local`, restart Expo and
+fully reload the app so public variables are included in the bundle. This LAN
+preview is for development, not public distribution.
+
+**5. Check the installation**
+
+```bash
+npm run typecheck:app
+npm run test:breathing
+npm run test:outdoor-data
+npm run test:auth
+npm run test:ai-worker
+```
+
+Create an account on the phone and verify Firestore-backed actions. For AI,
+accept the in-app agreement and test Alien Mode and Bio Radar. If AI says it
+is not configured, check the Worker URL in `.env.local`, restart Expo, and
+reload. More checks are listed under [Verification](#verification).
+
+**Optional: Firebase Functions**
+
+The separate `functions/` package uses Node.js 20 and is not required for the
+core app or hosted AI service. To install and build it:
+
+```bash
+npm ci --prefix functions
+npm run typecheck:functions
+```
+
+Deploying Functions requires a billing-enabled Firebase plan. Only after
+reviewing costs and selecting the intended project, deploy with
+`npx firebase deploy --only functions --project YOUR_FIREBASE_PROJECT_ID`.
+Firebase emulators can be used for the repository's rules tests; the mobile
+app is not currently wired to connect to them, so use a configured Firebase
+project for the app itself.
+
+**Optional: Profile-photo uploads**
+
+Create an unsigned upload preset in Cloudinary using its
+[upload preset guide](https://cloudinary.com/documentation/upload_presets), then
+set `EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME` and
+`EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET` in `.env.local`. These values are public
+client configuration; configure the preset's restrictions appropriately and
+review the provider's usage limits. Restart Expo and reload the app after editing
+the file.
 
 ## Demo
 
@@ -228,192 +418,6 @@ users/{uid}/
 - `expo-blur` and `expo-linear-gradient` for visual depth
 - Optional Cloudinary profile-photo uploads
 
-## Requirements
-
-- Node.js 22.13 or newer in the 22.x line, 24.3 or newer in the 24.x line,
-  26.x, or 27 or newer
-- npm
-- An Expo-compatible device with Expo Go, or an Android/iOS simulator
-- A Firebase project for remote development or production
-- Firebase CLI for rules, storage, functions, and emulator commands:
-
-```bash
-npm install -g firebase-tools
-firebase login
-```
-
-## Installation
-
-### Frontend: local Expo development
-
-1. Clone the repository and install dependencies:
-
-   ```bash
-   git clone <repository-url>
-   cd Kenetic
-   npm install
-   ```
-
-2. Create a local environment file:
-
-   ```bash
-   copy .env.example .env.local
-   ```
-
-   On macOS/Linux, use `cp .env.example .env.local` instead.
-
-3. Fill in the Firebase app values from Firebase Console. The required
-   values are documented in `.env.example` and loaded by
-   `src/lib/firebase/config.ts`:
-
-   ```dotenv
-   EXPO_PUBLIC_FIREBASE_API_KEY=...
-   EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN=...
-   EXPO_PUBLIC_FIREBASE_PROJECT_ID=...
-   EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=...
-   EXPO_PUBLIC_FIREBASE_APP_ID=...
-   ```
-
-   Firebase's JavaScript SDK uses this app configuration on mobile too.
-   `EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET` is optional and is not needed for the
-   free-tier setup.
-
-4. Start Expo:
-
-   ```bash
-   npx expo start
-   ```
-
-   Use `npx expo start --lan` when the phone and computer are on the same
-   network. If the default port is occupied, Expo will offer another port.
-   Scan the QR code from Expo Go. On a physical iPhone, the Expo CLI and
-   Expo Go must be signed in to the same Expo account for a development
-   server. This QR code is not a public distribution method for iPhone users.
-   See [Expo's sign-in guide](https://docs.expo.dev/troubleshooting/expo-go-sign-in-required/).
-
-Useful frontend commands:
-
-```bash
-npm run start
-npm run android
-npm run ios
-npm run build:android:apk
-npm run test:outdoor-data
-npx expo export --platform android
-```
-
-The APK build uses Expo Build's free internal-distribution profile. It requires
-an Expo account and the required `EXPO_PUBLIC_FIREBASE_*` values in the
-project's Expo `preview` environment; local `.env.local` files are not sent to
-remote builds. The resulting APK can be shared directly without publishing
-through an app store.
-
-### Backend: Firebase project setup
-
-1. Create a Firebase project in the Firebase Console.
-2. Register a Web app to get the Firebase JavaScript SDK configuration and
-   copy its values into `.env.local`. This does not enable web support in
-   Kenetic.
-3. Enable the authentication providers required by the app:
-   - Anonymous authentication for first-use sessions.
-   - Email/password for account registration and login.
-4. Create a Cloud Firestore database.
-5. Select the Firebase project locally:
-
-   ```bash
-   firebase use <project-id>
-   ```
-
-6. Deploy the Firestore security rules:
-
-   ```bash
-   npm run firebase:deploy:rules
-   ```
-
-The Firestore rules enforce authenticated ownership below `users/{uid}` and
-validate enums, timestamps, coordinates, quiz records, scan records, and
-session lifecycle fields. The free Spark plan supports Authentication and
-Firestore within Firebase's published quotas. Firebase Storage and Cloud
-Functions require a billing-enabled plan, so leave them disabled to keep the
-project at $0. Profile-photo uploads need optional Cloudinary configuration
-or should be left unused.
-
-### Backend: Firebase Functions
-
-The repository includes an optional `functions/` package configured for
-Node.js 20. Deploying it requires a billing-enabled Firebase plan.
-Install and build it independently when functions are needed:
-
-```bash
-cd functions
-npm install
-npm run build
-cd ..
-```
-
-Deploy functions from the repository root:
-
-```bash
-npm run firebase:deploy:functions
-```
-
-The current core Bio Radar and Curiosity Quiz flows do not require an AI
-Cloud Function. Their matching and question selection are deterministic and
-local; Firestore stores the resulting activity and user history.
-
-### Local Firebase emulators
-
-For offline backend development, enable emulators in `.env.local`:
-
-```dotenv
-EXPO_PUBLIC_USE_FIREBASE_EMULATORS=true
-EXPO_PUBLIC_FIREBASE_PROJECT_ID=demo-kenetic
-```
-
-Start the configured services:
-
-```bash
-npx firebase emulators:start
-```
-
-The configured ports are:
-
-| Service        | Port |
-| -------------- | ---: |
-| Authentication | 9099 |
-| Firestore      | 8080 |
-| Functions      | 5001 |
-| Storage        | 9199 |
-| Emulator UI    | 4000 |
-
-The emulator project ID and frontend environment must match. Emulator data
-is local and should not be treated as production data.
-
-### Staging and production environments
-
-Keep separate Firebase projects for development, staging, and production.
-Use one environment file per deployment target and never commit secrets:
-
-```text
-.env.local                 local machine values
-.env.development.example   development template
-.env.production.example    production template
-```
-
-Before a staging or production build:
-
-1. Point `EXPO_PUBLIC_FIREBASE_PROJECT_ID` and the other Firebase values at the
-   target project.
-2. Deploy that project's rules and storage rules.
-3. Verify the enabled Auth providers and authorized domains.
-4. Restrict Google API keys by application and API, especially Places keys.
-5. Verify camera and location configuration in `app.json`.
-6. Export or build with the target environment loaded.
-
-Do not expose Firebase service-account JSON or admin credentials in Expo
-environment variables. Public Expo variables are bundled into the client and
-must only contain client-safe configuration.
-
 ## How To Use The App
 
 ### First launch
@@ -491,7 +495,6 @@ Required Firebase client configuration:
 EXPO_PUBLIC_FIREBASE_API_KEY=
 EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN=
 EXPO_PUBLIC_FIREBASE_PROJECT_ID=
-EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET=
 EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=
 EXPO_PUBLIC_FIREBASE_APP_ID=
 ```
@@ -499,7 +502,8 @@ EXPO_PUBLIC_FIREBASE_APP_ID=
 Optional integrations:
 
 ```dotenv
-EXPO_PUBLIC_USE_FIREBASE_EMULATORS=false
+EXPO_PUBLIC_AI_SERVICE_URL=
+EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET=
 EXPO_PUBLIC_FIREBASE_ENV=development
 EXPO_PUBLIC_GOOGLE_PLACES_API_KEY=
 EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID=
