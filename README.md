@@ -32,6 +32,10 @@
   - [Before and After](#before-and-after)
   - [Demo Video](#demo-video)
   - [Test Coverage and Results](#test-coverage-and-results)
+- [Conclusion](#conclusion)
+  - [Highlights](#highlights)
+  - [Challenges and Solutions](#challenges-and-solutions)
+  - [Future Improvements](#future-improvements)
 - [Product Overview](#product-overview)
   - [Focus](#focus)
   - [Breathe](#breathe)
@@ -591,6 +595,56 @@ npm run typecheck:app
 ```
 
 See [Verification](#verification) for the emulator tests and further checks.
+
+## Conclusion
+
+Kenetic brings its stress-reduction theme into everyday interactions: a user
+can take a small step towards a task, pause for a breathing practice, or
+observe something outdoors. Building the app showed how much the quality of
+those experiences depends on both the visual design and the reliability of
+the flows behind it.
+
+### Highlights
+
+- **A cohesive mobile experience:** Focus, Breathe, and Outdoors have distinct
+  colours and activities while sharing a gesture-led visual language.
+- **Meaningful actions and progress:** Focus sessions, breathing practices,
+  saved discoveries and places, quizzes, and challenges give users ways to
+  act and return to their progress.
+- **Iteration through use:** The iPhone walkthrough helped identify and refine
+  practical issues, including the music handoff, breathing flow, and logout.
+- **Thoughtful AI use:** Alien Mode and Bio Radar add personalised assistance
+  while requiring an account agreement and presenting identifications as
+  uncertain estimates.
+
+### Challenges and Solutions
+
+| Challenge | Approach |
+| --- | --- |
+| Keeping the app compatible with the available iPhone preview | Upgraded Expo from SDK 54 to SDK 58 and checked iOS exports and the app on the project's iPhone. Sharing a preview with unrelated Expo accounts remains unverified. |
+| Making focus and breathing sessions more dependable | Changed the music handoff to start the focus timer on return, used account-scoped recovery for active sessions, and added explicit retries when completion cannot be saved. |
+| Adding AI without exposing credentials or presenting guesses as facts | Routed requests through a hosted Worker with a server-side key and Firebase token verification; added an account agreement and uncertainty messaging. |
+| Delivering useful outdoor features within service constraints | Made Spot Keeper a manual saved-places experience, and combined curated quiz questions with recall of saved descriptions rather than presenting AI estimates as verified facts. |
+| Making challenges continue regardless of completion | Added an account-scoped rolling 24-hour schedule, a countdown, saved completion history, and a completion message. |
+| Balancing the project with free-service limits | Kept live Firebase Storage and Functions optional and documented their billing requirements and provider quota limits instead of assuming they are free for every deployment. |
+
+### Future Improvements
+
+The following are opportunities for future work, not features currently
+promised or completed:
+
+- Test Android devices and different screen sizes, and carry out VoiceOver and
+  TalkBack testing to improve accessibility across gesture-led flows.
+- Expand automated integration and device tests, run the Firebase rules
+  emulators as needed, and measure line and branch coverage.
+- Explore a supported distribution approach for panel members using their
+  own accounts, as well as native build and release preparation.
+- Consider nearby-place discovery for Spot Keeper if a suitable provider,
+  privacy approach, and sustainable pricing can be established.
+- Review optional image storage, notification delivery, and additional
+  sign-in methods against their cost, privacy, and maintenance requirements.
+- Continue refining breathing, discovery, and AI experiences through user
+  feedback while keeping AI descriptions clearly labelled as uncertain.
 
 ## Product Overview
 
