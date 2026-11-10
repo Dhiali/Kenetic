@@ -36,18 +36,6 @@
   - [Highlights](#highlights)
   - [Challenges and Solutions](#challenges-and-solutions)
   - [Future Improvements](#future-improvements)
-- [Product Overview](#product-overview)
-  - [Focus](#focus)
-  - [Breathe](#breathe)
-  - [Outdoors](#outdoors)
-- [Architecture](#architecture)
-  - [AI setup and restrictions](#ai-setup-and-restrictions)
-- [Technology](#technology)
-- [How To Use The App](#how-to-use-the-app)
-- [Environment Variables](#environment-variables)
-- [Project Structure](#project-structure)
-- [Verification](#verification)
-- [Known Product Boundaries](#known-product-boundaries)
 - [License](#license)
 - [Acknowledgments](#acknowledgments)
 - [Author](#author)
@@ -204,8 +192,23 @@ packages merely to run the existing project.
    EXPO_PUBLIC_AI_SERVICE_URL=https://your-worker.example.workers.dev
    ```
 
-   Review [AI setup and restrictions](#ai-setup-and-restrictions), including
-   country restrictions, consent, and quotas, before using or sharing the app.
+   Review the restrictions below before using or sharing the app.
+
+**AI privacy, eligibility, and limits**
+
+- The Worker rejects requests without a Cloudflare country and requests from
+  the UK, EEA, or Switzerland. Country detection and age self-attestation
+  cannot guarantee eligibility; the app must not be directed at or likely
+  accessed by children. Check current Gemini terms and free-tier availability
+  before deployment.
+- The app checks the account's AI agreement before each request. Users can
+  review or withdraw it in Profile; a task or photo is sent only when the
+  user initiates the action. Unpaid Gemini input and output may be reviewed by
+  people and used to improve Google's products, so do not send personal,
+  confidential, or sensitive content.
+- Limits are 10 requests per Firebase user and 100 total per UTC day. Rejected
+  provider calls also count. Provider quotas may be lower, and enabling billing
+  may incur charges despite these caps.
 
 **4. Start the frontend**
 
@@ -234,7 +237,7 @@ npm run test:ai-worker
 Create an account on the phone and verify Firestore-backed actions. For AI,
 accept the in-app agreement and test Alien Mode and Bio Radar. If AI says it
 is not configured, check the Worker URL in `.env.local`, restart Expo, and
-reload. More checks are listed under [Verification](#verification).
+reload. More checks are listed under [Test Coverage and Results](#test-coverage-and-results).
 
 **Optional: Firebase Functions**
 
@@ -305,7 +308,8 @@ suggested step and focus-time choices.
 ### Guided Breathing
 
 Four guided practices offer visual and haptic cues. Users can choose flexible
-guidance or chest-based, motion-sensitive guidance before starting.
+guidance or chest-based, motion-sensitive guidance before starting. In chest
+mode, movement pauses the cues while the session timer continues.
 
 **Mockup screenshot:** Capture an active breathing session showing the
 countdown and current breathing cue.
@@ -315,7 +319,7 @@ countdown and current breathing cue.
 After AI consent, users photograph something in nature and receive a possible
 discovery with a description and uncertainty. Saved descriptions can later be
 used in quizzes. Results are AI estimates, not verified identifications or
-safety advice.
+safety advice; photos are not saved to Firestore.
 
 **Mockup screenshot:** Capture the **Possible discovery** result card with its
 description and Save action.
@@ -555,8 +559,7 @@ so this is a snapshot comparison rather than an exact log of work hours.
 | **Documentation and checks** | The project had a README and demo link. | The README now includes setup instructions, feature mockup prompts, design decisions, diagrams, and verification results. Automated tests and Firebase rules tests were added. |
 
 These are representative changes, not a claim that every feature or platform
-has been exhaustively tested. See [Test Coverage and Results](#test-coverage-and-results)
-and [Known Product Boundaries](#known-product-boundaries).
+has been exhaustively tested. See [Test Coverage and Results](#test-coverage-and-results).
 
 ### Demo Video
 
@@ -594,7 +597,17 @@ node --test $files
 npm run typecheck:app
 ```
 
-See [Verification](#verification) for the emulator tests and further checks.
+For additional checks, Java must be on `PATH` for the local rules emulators:
+
+```bash
+npm run test:firestore-rules
+npm run test:storage-rules
+npx expo export --platform all
+```
+
+The rules tests use a demo Firebase project and may download emulator binaries.
+They do not deploy rules or configure live Storage. The outdoor data tests use
+an in-memory Firestore mock and do not verify live rules or offline behaviour.
 
 ## Conclusion
 
@@ -646,355 +659,10 @@ promised or completed:
 - Continue refining breathing, discovery, and AI experiences through user
   feedback while keeping AI descriptions clearly labelled as uncertain.
 
-## Product Overview
-
-The main flow is:
-
-```mermaid
-flowchart LR
-  Splash --> Auth[Login or sign up]
-  Auth --> Intake[Intake carousel]
-  Intake --> Onboarding[Onboarding ritual]
-  Onboarding --> Dashboard
-  Dashboard --> Focus[Focus state]
-  Dashboard --> Breathe[Breathe state]
-  Dashboard --> Outdoors[Outdoors state]
-  Dashboard --> Profile[Profile]
-  Outdoors --> Radar[Bio Radar]
-  Outdoors --> Quizzes[Curiosity Quizzes]
-  Outdoors --> Spots[Spot Keeper]
-  Outdoors --> Challenges[Daily Challenges]
-```
-
-### Focus
-
-Focus is designed for starting a task and reducing friction around the first
-small action. Get Shit Done opens the chosen music app and starts the focus
-timer when the user returns to Kenetic; there is no music-selection deadline.
-The timer uses a saved deadline so it can resume after the app is closed.
-Kenetic does not control music playback or lock other apps. Alien Mode sends
-the task to Gemini with the user's consent and presents suggested small steps.
-The user chooses 1–10 minutes per step and drags up to start the timer. They
-can finish early or wait for the timer, then review and start the next suggested
-step. Starting each focus session stores the original task and current step in
-Firestore; the suggested plan is also saved locally per account for recovery.
-Focus activity shows completed sessions and time for the last seven local
-calendar days (including today), all-time totals, and a breakdown by mode.
-
-### Breathe
-
-Breathe presents calm down, recenter, clear mind, and deep relax as swipeable
-exercise cards. Exercise launches and session completion data are persisted so
-the dashboard can show completed sessions, their duration, and the completion
-rate for sessions started during the current week. The rate is not a measure of
-recovery. Before an exercise, users can choose flexible on-screen and haptic
-guidance or chest-based motion-sensitive guidance. In chest mode, movement pauses
-the cues but the session timer continues; a still phone resumes the cues. The
-choice is restored with an active session.
-
-### Outdoors
-
-The Outdoors state connects the user's real-world discoveries to lightweight
-learning:
-
-- **Bio Radar:** sends a photo to Gemini after
-  consent. The result is an uncertain estimate, not a safety identification.
-- **Curiosity Quizzes:** offers daily curated general-nature questions alongside
-  recall questions based on saved Bio Radar descriptions. Those descriptions
-  remain uncertain AI estimates, not verified facts or safety advice. Quiz
-  questions do not send discoveries back to AI.
-- **Spot Keeper:** lets users manually save, rename, and delete places.
-  Nearby search is not available.
-- **Daily Challenges:** offers a grounding activity for each rolling 24-hour
-  window beginning when the user first opens it. A new activity appears after
-  each window whether or not the previous one was completed; progress is saved
-  per account. A live countdown shows when the next challenge arrives, and
-  completed challenges appear in a saved history.
-
-When saved, Bio Radar records the scan source, visual mode, AI result,
-and session lifecycle; it does not save the photo to Firestore.
-Curiosity Quizzes records the selected answer result and retention
-action. The Outdoors dashboard aggregates species scanned, quiz attempts,
-mastery percentage, and active learning days.
-
-## Architecture
-
-```mermaid
-flowchart TD
-  UI[Expo React Native UI]
-  Gestures[Reanimated and Gesture Handler]
-  Bootstrap[Firebase bootstrap wrappers]
-  Auth[Firebase Authentication]
-  Firestore[Cloud Firestore]
-  Storage[Firebase Storage]
-  Rules[Firestore and Storage Rules]
-  Local[Local question banks]
-  Worker[Hosted AI Worker]
-  Gemini[Gemini API]
-
-  UI --> Gestures
-  UI --> Bootstrap
-  UI --> Local
-  UI --> Worker
-  Worker --> Gemini
-  Bootstrap --> Auth
-  Bootstrap --> Firestore
-  UI --> Storage
-  Rules -. protects .-> Firestore
-  Rules -. protects .-> Storage
-```
-
-The application keeps Firebase calls behind `src/lib/firebase/bootstrap.ts`.
-Those wrappers establish an authenticated or anonymous user before calling
-the typed Firestore functions in `src/lib/firebase/firestore.ts`. This keeps
-screen components focused on interaction state and prevents collection paths
-from being duplicated throughout the UI.
-
-The mobile app starts at `App.tsx`; run `npm run typecheck:app` to check its
-dependency graph. Firebase Functions is a separate Node project; install its
-locked dependencies with `npm ci --prefix functions` and run
-`npm run typecheck:functions` to build it. The root TypeScript configuration
-also includes the separate, unused `src/app` Router/template code and is not
-the app-only check. Firebase's React Native persistence declaration is supplied
-locally because Firebase's public TypeScript export resolves to its browser
-types, while Metro uses its React Native implementation.
-
-### AI setup and restrictions
-
-The service in `ai-worker/` is not deployed by default. It requires a free
-Cloudflare Workers account, a Gemini API key kept as a Worker secret, and the
-same Firebase project ID as the app. Set `FIREBASE_PROJECT_ID` and a
-comma-separated `ALLOWED_COUNTRIES` list in `ai-worker/wrangler.toml`, using
-only countries where Gemini unpaid services are permitted. Requests without a
-Cloudflare country or from the UK, EEA, or Switzerland are rejected. IP-based
-geolocation and age self-attestation cannot guarantee eligibility; the app
-must not be directed at or likely accessed by children.
-
-Deploy only after verifying the target Cloudflare account, country list,
-Firebase project, current Gemini terms and free-tier model availability. Add
-the Gemini key with `npx wrangler secret put GEMINI_API_KEY` from `ai-worker`;
-never put it in app code or an `EXPO_PUBLIC_` variable. Set only the Worker's
-public HTTPS origin in `EXPO_PUBLIC_AI_SERVICE_URL` for the Expo preview
-environment. Saving AI discoveries additionally requires deploying the updated
-Firestore rules to the confirmed Firebase project. No deployment or billing
-configuration is performed automatically.
-
-Each user is shown an AI agreement before first use; the account-level
-agreement covers both Alien Mode and Bio Radar and can be reviewed or
-withdrawn in Profile. Each task or photo is sent only after the user initiates
-that action. The app checks the agreement with Firestore before each AI request,
-so a connection is required. Unpaid Gemini input and
-output may be reviewed by people and used to improve Google's products; do not
-send personal, confidential, or sensitive content. Daily limits are 10
-requests per Firebase user and 100 total, resetting at midnight UTC; rejected
-provider calls also use a request. Google's own quota may be lower and resets
-on its own schedule. The hosting plan and Google project must remain on their
-free tiers; a usage cap does not prevent charges if billing is enabled.
-
-User-owned records are stored below:
-
-```text
-users/{uid}/
-  sessions/
-  scanHistory/
-  quizHistory/
-  outdoorFeatureLaunches/
-  dashboardSelections/
-  metrics/
-  devices/
-  notificationEvents/
-  savedPlaces/
-  challengeProgress/
-```
-
-## Technology
-
-- React 19.3 and React Native 0.88
-- Expo SDK 58
-- TypeScript
-- Firebase JavaScript SDK 12
-- Firebase Authentication, Cloud Firestore, and Firebase Storage
-- `react-native-reanimated` for tweening, fades, spring motion, morphing,
-  progress states, and screen transitions
-- `react-native-gesture-handler` for swipe, drag, and hold interactions
-- `expo-haptics` for micro-actions and tactile feedback
-- `expo-camera`, `expo-location`, `expo-sensors`, and
-  `expo-notifications` for native capabilities
-- `expo-blur` and `expo-linear-gradient` for visual depth
-- Optional Cloudinary profile-photo uploads
-
-## How To Use The App
-
-### First launch
-
-1. Open the app in Expo Go or a native build.
-2. Move through the splash, authentication, intake, and onboarding screens.
-3. Complete the onboarding ritual to reach the gateway and dashboard.
-4. Drag Focus, Breathe, or Outdoors upward on the dashboard to open it.
-
-Signed-in users resume unfinished onboarding after restarting. If startup or
-onboarding cannot load or save their data, the app shows an error and retry
-option rather than silently skipping the step.
-
-### Navigation and micro-actions
-
-- Drag the labelled action to the right when prompted. On supported screen
-  readers, new swipe actions also expose an activate accessibility action.
-- Account choices, email sign-in and signup, the initial intention,
-  onboarding completion, dashboard states, and profile choices
-  also expose screen-reader activation. Signup activation agrees to the terms
-  and submits the form, just like the drag gesture. Screen-reader coverage is
-  still partial and requires VoiceOver and TalkBack device testing.
-- Swipe right on navigation rows to return to the previous state.
-- On screens with text fields, scroll to reach the rest of the form and drag
-  the page to dismiss the keyboard.
-- Drag text tokens into their muted target states to confirm an action.
-- Hold the Bio Radar reticle for two seconds to begin a scan.
-- Haptic feedback marks important starts, drops, successes, warnings, and
-  failures.
-- In Daily Challenges, drag to start or complete the current challenge, or
-  clear its progress before completion. In Spot Keeper, save a named place and
-  drag to edit or delete it.
-- Spot Keeper uses manually saved places and does not request location or use
-  Google Places.
-- Reanimated tweening and spring motion provide progress, snap, reveal, and
-  screen-transition feedback.
-
-### Bio Radar
-
-1. Open **Outdoors** and choose **Bio Radar**.
-2. Read and agree to the AI privacy notice, then grant camera permission.
-3. Hold the reticle for two seconds to send a photo.
-4. Review the AI estimate and uncertainty. Do not use it to make safety decisions.
-5. Drag `save discovery` right to save the result for later recall in quizzes.
-
-The scan is stored in `users/{uid}/scanHistory`. A matching outdoors session is
-started before processing and completed when the discovery is saved, or marked
-abandoned if the user exits early.
-
-### Curiosity Quizzes
-
-1. Open **Curiosity Quizzes** from Outdoors.
-2. The lobby loads saved Bio Radar descriptions and daily general questions.
-3. Drag `begin question` right, then drag an answer right to select it.
-4. Review the answer and drag `save answer and continue` right to record it.
-   Bio Radar answers repeat the saved AI estimate; they do not verify it.
-
-The queue uses up to five recent unique discoveries plus curated questions,
-and excludes questions already answered that UTC day. Saved discoveries,
-including earlier Bio Radar results, can be revisited on later days. A failed
-remote load or save has a retry path instead of appearing successful.
-
-### Dashboard and profile
-
-The dashboard shows state navigation and persisted activity. Outdoors metrics
-include species scanned, quiz answers, mastery index, and active learning days.
-Profile contains account and preference management. Anonymous activity can be
-associated with a registered account through the authentication flow.
-
-## Environment Variables
-
-Required Firebase client configuration:
-
-```dotenv
-EXPO_PUBLIC_FIREBASE_API_KEY=
-EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN=
-EXPO_PUBLIC_FIREBASE_PROJECT_ID=
-EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=
-EXPO_PUBLIC_FIREBASE_APP_ID=
-```
-
-Optional integrations:
-
-```dotenv
-EXPO_PUBLIC_AI_SERVICE_URL=
-EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET=
-EXPO_PUBLIC_FIREBASE_ENV=development
-EXPO_PUBLIC_GOOGLE_PLACES_API_KEY=
-EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID=
-EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID=
-EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID=
-EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME=
-EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET=
-```
-
-## Project Structure
-
-```text
-App.tsx                         Expo entry point
-app.json                        Expo permissions and native configuration
-src/app/                        App routing and layout
-src/screens/                    Feature screens and experiences
-src/components/                 Shared UI components
-src/lib/firebase/app.ts         Firebase app initialization
-src/lib/firebase/auth.ts        Auth and anonymous-user helpers
-src/lib/firebase/bootstrap.ts   Auth-aware feature wrappers
-src/lib/firebase/firestore.ts   Types, collections, CRUD, and metrics
-src/lib/firebase/storage.ts     Storage helpers
-src/constants/                  Theme constants
-src/theme/                      Shared colors and visual tokens
-firestore.rules                 Firestore ownership and validation rules
-storage.rules                   Storage ownership rules
-firebase.json                   Firebase services and emulator ports
-functions/                      Optional Firebase Functions package
-assets/images/kenetic-icon.png  Application icon PNG
-```
-
-## Verification
-
-Run the production-style bundle check before sharing a build:
-
-```bash
-npm run typecheck:app
-npm run typecheck:functions
-npm run test:auth
-npm run test:account-restore
-npm run test:breathing
-npm run test:curated-quiz
-npm run test:session-storage
-npm run test:focus-timing
-npm run test:ai-worker
-node --test scripts/test-ai-consent.cjs
-npm run test:outdoor-data
-npm run test:firestore-rules
-npm run test:storage-rules
-npx expo export --platform all
-```
-
-The outdoor data tests use an in-memory Firestore mock. They do not verify
-deployed Firebase rules, offline behavior, or physical-device interaction.
-The rules tests use local Firebase emulators and the demo project ID, never a
-live project. They require Java on `PATH` and may download emulator binaries
-on first use. Passing them does not deploy rules or configure live Storage.
-
-For backend changes, deploy or test the rules against the intended Firebase
-project. For device features, test permissions and gestures on a physical
-device because camera and haptics
-are not fully represented in a web browser.
-
-## Known Product Boundaries
-
-- Sign-in and signup use email and password. Apple and Google sign-in options
-  are not available; existing provider-only accounts cannot sign in through
-  the current app after signing out.
-- Push notification prompts and settings are unavailable because delivery is
-  not implemented. Previously saved notification preferences remain stored.
-
-- Bio Radar sends a photo to the configured AI service after consent; its
-  species identification is an uncertain estimate and not safety advice.
-- Curiosity Quiz questions come from a maintained local question bank; they
-  are not generated dynamically by an AI model.
-- Spot Keeper currently supports manually saved places only; nearby search is
-  unavailable.
-- Bio Radar photos are not saved to Firestore. Live Firebase Storage requires
-  billing-enabled configuration and has not been validated in this setup;
-  optional profile-photo uploads require separate Cloudinary configuration.
-- New breathing and Alien Mode timers are stored per account (and breathing
-  exercise). Older locally saved timers lack account identification and cannot
-  safely be resumed automatically after this update; their Firestore records
-  remain unchanged.
-- If saving an expired breathing or Alien Mode session fails, the user can
-  retry saving it. Leaving preserves the local session for a later retry.
+Current boundaries include email/password sign-in only, no push notification
+delivery, and manual-only Spot Keeper. Live Firebase Storage has not been
+validated in this setup. Older unscoped local breathing and Alien Mode timers
+cannot safely be restored automatically; their Firestore records remain.
 
 ## License
 
