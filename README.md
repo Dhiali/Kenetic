@@ -552,6 +552,8 @@ has been exhaustively tested. See [Test Coverage and Results](#test-coverage-and
 
 Watch the **[Kenetic demo on Google Drive](https://drive.google.com/file/d/1YRzw8xiRb9WkZUY4YqnlT9OEe4CRp3Xo/view?usp=sharing)**.
 
+Watch the **[additional demo on Google Drive](https://drive.google.com/file/d/1p6XA2Qiedugwyf_DobILBDoiwoQqx3mw/view?usp=sharing)**.
+
 ### Test Coverage and Results
 
 The automated checks below were run on **10 November 2026**. The iPhone
