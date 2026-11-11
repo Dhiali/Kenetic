@@ -277,8 +277,7 @@ Users can create an account or sign in with email and password, choose an
 initial intention, and complete the onboarding flow. Signed-in users can resume
 their saved progress when they return.
 
-**Mockup screenshot:** Capture the **Where to?** screen showing the Return and
-Begin choices.
+!(assets/images/iPhone 15 Pro)
 
 ### State Dashboard
 
