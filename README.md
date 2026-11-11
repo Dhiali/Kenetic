@@ -284,16 +284,14 @@ their saved progress when they return.
 The dashboard offers three paths—Focus, Breathe, and Outdoors. Users drag a
 state upward to enter its activities.
 
-**Mockup screenshot:** Capture the main dashboard with all three state choices
-visible.
+![Account and onboarding mockup](assets/images/iPhone 13 (2.png)
 
 ### Get Shit Done
 
 Users choose Apple Music or Spotify and a focus duration. The focus timer starts
 when they return to Kenetic after opening their music app.
 
-**Mockup screenshot:** Capture the **Stay with it** screen while a focus timer
-is running.
+![Account and onboarding mockup](assets/images/iPhone 16.png)
 
 ### Alien Mode
 
@@ -301,8 +299,7 @@ With the user's agreement, Alien Mode sends an overwhelming task to the AI
 service and presents small suggested steps. Users choose a 1–10 minute focus
 session, finish a step, and review the next one.
 
-**Mockup screenshot:** Capture the **Start small** screen showing the first
-suggested step and focus-time choices.
+![Account and onboarding mockup](assets/images/iPhone 16 Pro (2.png)
 
 ### Guided Breathing
 
@@ -310,8 +307,7 @@ Four guided practices offer visual and haptic cues. Users can choose flexible
 guidance or chest-based, motion-sensitive guidance before starting. In chest
 mode, movement pauses the cues while the session timer continues.
 
-**Mockup screenshot:** Capture an active breathing session showing the
-countdown and current breathing cue.
+![Account and onboarding mockup](assets/images/iPhone 13 (3).png)
 
 ### Bio Radar
 
@@ -320,8 +316,7 @@ discovery with a description and uncertainty. Saved descriptions can later be
 used in quizzes. Results are AI estimates, not verified identifications or
 safety advice; photos are not saved to Firestore.
 
-**Mockup screenshot:** Capture the **Possible discovery** result card with its
-description and Save action.
+![Account and onboarding mockup](assets/images/iPhone 15 Pro (1).png)
 
 ### Curiosity Quizzes
 
@@ -329,16 +324,14 @@ Users revisit descriptions saved through Bio Radar and answer curated
 general-nature questions. Answers are saved, and daily questions refresh at
 midnight UTC.
 
-**Mockup screenshot:** Capture a quiz question with its answer choices visible,
-preferably one based on a saved Bio Radar discovery.
+![Account and onboarding mockup](assets/images/iPhone 15 (1).png)
 
 ### Spot Keeper
 
 Users manually save, rename, and delete places they want to revisit. Spot Keeper
 does not search for nearby places.
 
-**Mockup screenshot:** Capture **Spot keeper** with at least one saved place
-visible.
+![Account and onboarding mockup](assets/images/iPhone 15 (2).png)
 
 ### Daily Challenges
 
@@ -346,16 +339,14 @@ Each account receives a grounding activity for a rolling 24-hour window. A
 countdown shows when the next challenge arrives, and completed challenges are
 saved in a history list.
 
-**Mockup screenshot:** Capture **A moment outside** after completing a
-challenge, showing the countdown and completed-challenge list.
+![Account and onboarding mockup](assets/images/iPhone 14 Pro.png)
 
 ### Activity and Profile
 
 The state dashboards show saved activity, while Profile lets users manage
 their account and review or withdraw their AI agreement.
 
-**Mockup screenshot:** Capture **Your focus activity** on the Focus dashboard
-with its recent activity and mode breakdown visible.
+![Account and onboarding mockup](assets/images/iPhone 15 Pro (1).png)
 
 ## Development Process
 
